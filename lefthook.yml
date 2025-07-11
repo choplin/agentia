@@ -1,0 +1,62 @@
+# Lefthook configuration
+# https://lefthook.dev/configuration/
+
+pre-commit:
+  parallel: true
+  jobs:
+    # TypeScript/JavaScript formatting
+    - name: prettier
+      glob: "*.{js,ts,svelte,json,yml,yaml,md}"
+      run: npx prettier --write {staged_files}
+      stage_fixed: true
+
+    # TypeScript/JavaScript linting
+    - name: eslint
+      glob: "*.{js,ts,svelte}"
+      run: npx eslint --fix {staged_files}
+      stage_fixed: true
+
+    # Rust formatting
+    - name: rustfmt
+      glob: "*.rs"
+      run: rustfmt --edition 2021 {staged_files}
+
+    # Rust linting
+    - name: clippy
+      glob: "*.rs"
+      run: |
+        cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
+
+    # Svelte check
+    - name: svelte-check
+      glob: "*.{svelte,ts,js}"
+      run: pnpm svelte-check --fail-on-warnings
+
+    - name: remove-trailing-spaces
+      run: perl -i -pe 's/[ \t]+$//' {staged_files}
+      glob:
+        - "*.{ts,js,json,yml,yaml,md,txt,toml,svelte,rs}"
+        - ".*ignore"
+        - "Cargo.toml"
+        - "README*"
+      stage_fixed: true
+
+    - name: ensure-newline-eof
+      run: perl -i -pe 'chomp if eof; $_ .= "\n" if eof' {staged_files}
+      glob:
+        - "*.{ts,js,json,yml,yaml,md,txt,toml,svelte,rs}"
+        - ".*ignore"
+        - "Cargo.toml"
+        - "README*"
+      stage_fixed: true
+
+pre-push:
+  parallel: true
+  jobs:
+    # Run tests before pushing
+    - name: rust-test
+      run: cd src-tauri && cargo test
+
+    # Type checking
+    - name: typescript-check
+      run: pnpm check

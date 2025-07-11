@@ -1,0 +1,33 @@
+# OS files
+.DS_Store
+
+# Dependencies
+node_modules/
+
+# Build outputs
+/build
+/.svelte-kit
+/package
+/dist
+/target
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Rust
+**/*.rs.bk
+Cargo.lock
+
+# Lefthook
+.lefthook-local/

@@ -1,0 +1,7 @@
+[build]
+# ビルド時の並列度を設定
+jobs = 8
+
+[target.'cfg(all())']
+# すべてのターゲットで clippy を使用
+rustflags = ["-W", "clippy::all", "-W", "clippy::pedantic"]

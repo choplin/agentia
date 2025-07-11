@@ -1,0 +1,14 @@
+{
+  "style": "new-york",
+  "tailwind": {
+    "config": "tailwind.config.js",
+    "css": "src/app.css",
+    "baseColor": "slate"
+  },
+  "components": {
+    "path": "src/lib/components/ui"
+  },
+  "utils": {
+    "path": "src/lib/utils.ts"
+  }
+}
