@@ -7,12 +7,13 @@ use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-/// Claude CLI streaming response types
+/// Claude CLI response types (both streaming and non-streaming)
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 #[allow(dead_code)]
-pub enum StreamingResponse {
+pub enum ClaudeResponse {
+    // Streaming response types
     MessageStart { message: StreamingMessage },
     ContentBlockStart { index: usize, content_block: ContentBlock },
     ContentBlockDelta { index: usize, delta: ContentDelta },
@@ -20,6 +21,9 @@ pub enum StreamingResponse {
     MessageDelta { delta: MessageDelta, usage: Usage },
     MessageStop {},
     Error { error: ErrorDetail },
+    // Non-streaming response types
+    System { subtype: String, session_id: Option<String> },
+    Assistant { message: AssistantMessage },
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -30,6 +34,26 @@ pub struct StreamingMessage {
     pub content: Vec<serde_json::Value>,
     pub model: String,
     pub usage: Usage,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct AssistantMessage {
+    pub id: String,
+    pub role: String,
+    pub content: Vec<AssistantContent>,
+    pub model: String,
+    pub usage: Usage,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum AssistantContent {
+    Text { text: String },
+    #[serde(rename = "tool_use")]
+    ToolUse { id: String, name: String, input: serde_json::Value },
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -128,9 +152,39 @@ impl ClaudeCLI {
 
                 debug!("Claude CLI output: {}", line);
 
-                match serde_json::from_str::<StreamingResponse>(&line) {
+                match serde_json::from_str::<ClaudeResponse>(&line) {
                     Ok(response) => match response {
-                        StreamingResponse::ContentBlockStart { content_block, .. } => {
+                        ClaudeResponse::System { subtype, .. } => {
+                            info!("Claude CLI system message: {}", subtype);
+                        }
+                        ClaudeResponse::Assistant { message } => {
+                            // Handle complete assistant message
+                            for content in &message.content {
+                                match content {
+                                    AssistantContent::Text { text } => {
+                                        let msg = Message::new_text(MessageRole::Assistant, text.clone());
+                                        let _ = tx_stdout.send(msg);
+                                    }
+                                    AssistantContent::ToolUse { name, input, .. } => {
+                                        let msg = Message {
+                                            id: uuid::Uuid::new_v4(),
+                                            role: MessageRole::Assistant,
+                                            message_type: MessageType::ToolUse,
+                                            content: MessageContent {
+                                                text: None,
+                                                tool_name: Some(name.clone()),
+                                                tool_input: Some(input.clone()),
+                                                tool_result: None,
+                                                error: None,
+                                            },
+                                            timestamp: chrono::Utc::now(),
+                                        };
+                                        let _ = tx_stdout.send(msg);
+                                    }
+                                }
+                            }
+                        }
+                        ClaudeResponse::ContentBlockStart { content_block, .. } => {
                             match content_block {
                                 ContentBlock::Text { .. } => {
                                     current_text.clear();
@@ -141,7 +195,7 @@ impl ClaudeCLI {
                                 }
                             }
                         }
-                        StreamingResponse::ContentBlockDelta { delta, .. } => match delta {
+                        ClaudeResponse::ContentBlockDelta { delta, .. } => match delta {
                             ContentDelta::TextDelta { text } => {
                                 current_text.push_str(&text);
                                 // Send incremental text update
@@ -154,7 +208,7 @@ impl ClaudeCLI {
                                 current_tool_input.push_str(&partial_json);
                             }
                         },
-                        StreamingResponse::ContentBlockStop { .. } => {
+                        ClaudeResponse::ContentBlockStop { .. } => {
                             if let Some(tool_name) = current_tool_name.take() {
                                 // Parse and send tool use message
                                 if let Ok(input) = serde_json::from_str(&current_tool_input) {
@@ -176,7 +230,7 @@ impl ClaudeCLI {
                                 current_tool_input.clear();
                             }
                         }
-                        StreamingResponse::Error { error } => {
+                        ClaudeResponse::Error { error } => {
                             let _ = tx_stdout.send(Message::new_error(error.message));
                         }
                         _ => {}
