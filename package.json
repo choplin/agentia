@@ -18,7 +18,8 @@
     "check:ts": "eslint . && prettier --check .",
     "fmt": "pnpm fmt:ts && pnpm fmt:rust",
     "lint": "pnpm lint:ts && pnpm check && pnpm lint:rust",
-    "prepare": "lefthook install"
+    "prepare": "lefthook install",
+    "reset-db": "./scripts/reset-db.sh"
   },
   "license": "MIT",
   "dependencies": {

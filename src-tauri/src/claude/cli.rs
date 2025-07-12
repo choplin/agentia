@@ -2,6 +2,7 @@ use super::message::{Message, MessageContent, MessageRole, MessageType};
 use anyhow::Result;
 use serde::Deserialize;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -200,7 +201,6 @@ pub struct ClaudeCommandBuilder {
     // IDE
     ide: bool,
 }
-
 
 #[allow(dead_code)]
 impl ClaudeCommandBuilder {
@@ -409,21 +409,23 @@ impl ClaudeCommandBuilder {
 }
 
 pub struct ClaudeCLI {
-    // Claude CLIから返されたセッションIDを保持
-    claude_session_id: Option<String>,
+    // Holds the session ID returned from Claude CLI
+    claude_session_id: Arc<Mutex<Option<String>>>,
 }
 
 impl ClaudeCLI {
     pub fn new() -> Self {
-        Self { claude_session_id: None }
+        Self { claude_session_id: Arc::new(Mutex::new(None)) }
     }
 
     pub fn set_session_id(&mut self, session_id: String) {
-        self.claude_session_id = Some(session_id);
+        if let Ok(mut guard) = self.claude_session_id.lock() {
+            *guard = Some(session_id);
+        }
     }
 
-    pub fn get_session_id(&self) -> Option<&String> {
-        self.claude_session_id.as_ref()
+    pub fn get_session_id(&self) -> Option<String> {
+        self.claude_session_id.lock().ok()?.clone()
     }
 
     /// Send a message using Claude CLI with builder pattern
@@ -445,7 +447,6 @@ impl ClaudeCLI {
 
         // Handle stdout (streaming JSON)
         let tx_stdout = tx.clone();
-        let claude_session_id = self.claude_session_id.clone();
 
         tokio::spawn(async move {
             let reader = BufReader::new(stdout);
@@ -453,7 +454,7 @@ impl ClaudeCLI {
             let mut current_text = String::new();
             let mut current_tool_name: Option<String> = None;
             let mut current_tool_input = String::new();
-            let mut _session_id_holder: Option<String> = claude_session_id;
+            let mut _session_id_holder: Option<String> = None;
 
             while let Ok(Some(line)) = lines.next_line().await {
                 if line.trim().is_empty() {
@@ -515,7 +516,7 @@ impl ClaudeCLI {
                                     subtype, result
                                 );
                             }
-                            // Result メッセージを受信したら処理を終了
+                            // Exit processing when Result message is received
                             break;
                         }
                         ClaudeResponse::ContentBlockStart { content_block, .. } => {
@@ -617,10 +618,16 @@ impl ClaudeCLI {
             let _ = child.wait().await;
         });
 
-        // Check for session ID from the spawned task
-        if let Ok(session_id) = session_rx.try_recv() {
-            self.set_session_id(session_id);
-        }
+        // Update session ID when received
+        let session_id_holder = self.claude_session_id.clone();
+        tokio::spawn(async move {
+            if let Some(session_id) = session_rx.recv().await {
+                if let Ok(mut guard) = session_id_holder.lock() {
+                    debug!("Storing Claude session ID in CLI instance: {}", session_id);
+                    *guard = Some(session_id);
+                }
+            }
+        });
 
         Ok(rx)
     }

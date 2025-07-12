@@ -54,6 +54,15 @@ export interface Session {
   updatedAt: string;
 }
 
+export interface Project {
+  id: string;
+  path: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  settings: string | null;
+}
+
 export class ClaudeAPI {
   private listeners: Map<string, UnlistenFn> = new Map();
 
@@ -107,6 +116,14 @@ export class ClaudeAPI {
       unlisten();
       this.listeners.delete(eventName);
     };
+  }
+
+  async getProjects(): Promise<Project[]> {
+    return invoke<Project[]>("get_projects");
+  }
+
+  async selectProject(projectId: string): Promise<void> {
+    return invoke<void>("select_project", { projectId });
   }
 
   cleanup() {

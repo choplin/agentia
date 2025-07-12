@@ -1,11 +1,13 @@
 #![allow(clippy::used_underscore_binding)]
 
 mod claude;
+mod db;
 mod storage;
 
 use claude::{
     ClaudeCLI, ClaudeCommandBuilder, Message, MessageRole, OutputFormat, Session, SessionConfig,
 };
+use db::Database;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
@@ -16,13 +18,17 @@ use uuid::Uuid;
 pub struct AppState {
     sessions: Arc<RwLock<HashMap<Uuid, Arc<RwLock<Session>>>>>,
     active_clis: Arc<Mutex<HashMap<Uuid, ClaudeCLI>>>,
+    db: Arc<Mutex<Database>>,
+    current_project_id: Arc<RwLock<Option<String>>>,
 }
 
-impl Default for AppState {
-    fn default() -> Self {
+impl AppState {
+    fn new(db: Database) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             active_clis: Arc::new(Mutex::new(HashMap::new())),
+            db: Arc::new(Mutex::new(db)),
+            current_project_id: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -34,9 +40,29 @@ async fn create_session(
     title: String,
     config: SessionConfig,
 ) -> Result<Session, String> {
-    let session = Session::new(title, config);
-    let session_arc = Arc::new(RwLock::new(session.clone()));
+    // Get current project ID
+    let project_id = {
+        let current_project = state.current_project_id.read().await;
+        current_project.clone().ok_or("No project selected")?
+    };
 
+    // Create session with DB ID
+    let mut session = Session::new(title.clone(), config.clone());
+
+    // Serialize config to JSON
+    let config_json = serde_json::to_string(&config).map_err(|e| e.to_string())?;
+
+    // Create session in DB
+    let db_session = state
+        .db
+        .lock()
+        .await
+        .create_session(&project_id, None, &title, Some(&config_json))
+        .map_err(|e| e.to_string())?;
+
+    session.id = Uuid::parse_str(&db_session.id).map_err(|e| e.to_string())?;
+
+    let session_arc = Arc::new(RwLock::new(session.clone()));
     state.sessions.write().await.insert(session.id, session_arc);
 
     Ok(session)
@@ -58,11 +84,26 @@ async fn get_session(
 
 #[tauri::command]
 async fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<Session>, String> {
+    // Get current project ID
+    let project_id = {
+        let current_project = state.current_project_id.read().await;
+        current_project.clone().ok_or("No project selected")?
+    };
+
+    // Get sessions from DB for current project
+    let db_sessions =
+        state.db.lock().await.get_sessions_by_project(&project_id).map_err(|e| e.to_string())?;
+
+    // Get in-memory sessions that match DB sessions
     let sessions = state.sessions.read().await;
     let mut result = Vec::new();
 
-    for session_arc in sessions.values() {
-        result.push(session_arc.read().await.clone());
+    for db_session in db_sessions {
+        if let Ok(session_uuid) = Uuid::parse_str(&db_session.id) {
+            if let Some(session_arc) = sessions.get(&session_uuid) {
+                result.push(session_arc.read().await.clone());
+            }
+        }
     }
 
     result.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -101,7 +142,10 @@ async fn send_message(
 
     // Load existing session ID if available
     if let Some(claude_session_id) = &session_arc.read().await.claude_session_id {
+        println!("Loading existing Claude session ID: {claude_session_id}");
         cli.set_session_id(claude_session_id.clone());
+    } else {
+        println!("No existing Claude session ID for agentia session: {session_id}");
     }
 
     // Build command
@@ -112,9 +156,9 @@ async fn send_message(
         .permission_mode(&config.permission_mode)
         .verbose();
 
-    // Resume session if we have a session ID
-    if let Some(session_id) = cli.get_session_id() {
-        builder = builder.resume(session_id);
+    // Resume session if we have a Claude session ID
+    if let Some(claude_session_id) = cli.get_session_id() {
+        builder = builder.resume(claude_session_id);
     }
 
     // Set working directory
@@ -149,8 +193,16 @@ async fn send_message(
             if let Some(cli) = clis.remove(&session_id_copy) {
                 // Get Claude session ID from CLI and save it
                 if let Some(claude_session_id) = cli.get_session_id() {
+                    println!("Saving Claude session ID: {claude_session_id} for agentia session: {session_id_copy}");
                     session_arc_copy.write().await.claude_session_id =
                         Some(claude_session_id.clone());
+
+                    // Update DB with Claude session ID
+                    let _ = state
+                        .db
+                        .lock()
+                        .await
+                        .update_session_claude_id(&session_id_copy.to_string(), &claude_session_id);
                 }
             }
         }
@@ -163,6 +215,31 @@ async fn send_message(
 async fn stop_session(state: tauri::State<'_, AppState>, session_id: Uuid) -> Result<(), String> {
     let mut clis = state.active_clis.lock().await;
     clis.remove(&session_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_projects(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<db::models::Project>, String> {
+    state.db.lock().await.get_projects().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn select_project(
+    state: tauri::State<'_, AppState>,
+    project_id: String,
+) -> Result<(), String> {
+    // Validate project exists by getting the specific session
+    let project = state.db.lock().await.get_project(&project_id).map_err(|e| e.to_string())?;
+
+    if project.is_none() {
+        return Err("Project not found".to_string());
+    }
+
+    // Update current project
+    *state.current_project_id.write().await = Some(project_id);
+
     Ok(())
 }
 
@@ -180,13 +257,98 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(AppState::default())
+        .setup(|app| {
+            // Initialize database
+            let db = Database::new(app.handle()).expect("Failed to initialize database");
+
+            // Check for existing projects or create default
+            let current_dir = std::env::current_dir().expect("Failed to get current directory");
+            let current_path = current_dir.to_string_lossy();
+
+            let project = db.get_project_by_path(&current_path).expect("Failed to query projects");
+
+            let project_id = if let Some(project) = project {
+                project.id
+            } else {
+                // Create default project for current directory
+                let project = db
+                    .create_project(
+                        &current_path,
+                        current_dir
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("Default Project"),
+                    )
+                    .expect("Failed to create default project");
+                project.id
+            };
+
+            // Create app state with DB
+            let state = AppState::new(db);
+            *state.current_project_id.blocking_write() = Some(project_id.clone());
+
+            // Load existing sessions from DB
+            {
+                let db = state.db.blocking_lock();
+                let db_sessions =
+                    db.get_sessions_by_project(&project_id).expect("Failed to load sessions");
+
+                let mut sessions = state.sessions.blocking_write();
+                for db_session in db_sessions {
+                    // Convert DB session to in-memory session
+                    // Note: We don't have messages here - they'll be loaded from Claude Code
+                    if let Ok(session_uuid) = Uuid::parse_str(&db_session.id) {
+                        // Deserialize config from JSON
+                        let config = if let Some(config_json) = &db_session.config {
+                            serde_json::from_str::<SessionConfig>(config_json).unwrap_or(
+                                SessionConfig {
+                                    model: "claude-3-5-sonnet-20241022".to_string(),
+                                    temperature: None,
+                                    max_tokens: None,
+                                    permission_mode: "default".to_string(),
+                                    working_directory: None,
+                                },
+                            )
+                        } else {
+                            SessionConfig {
+                                model: "claude-3-5-sonnet-20241022".to_string(),
+                                temperature: None,
+                                max_tokens: None,
+                                permission_mode: "default".to_string(),
+                                working_directory: None,
+                            }
+                        };
+
+                        let session = Session {
+                            id: session_uuid,
+                            title: db_session.title,
+                            config,
+                            messages: Vec::new(),
+                            status: claude::session::SessionStatus::Completed,
+                            created_at: db_session.created_at,
+                            updated_at: db_session.updated_at,
+                            claude_session_id: db_session.claude_session_id,
+                        };
+                        sessions.insert(session_uuid, Arc::new(RwLock::new(session)));
+                    }
+                }
+
+                let count = sessions.len();
+                println!("Loaded {count} sessions from database");
+            }
+
+            app.manage(state);
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             create_session,
             get_session,
             list_sessions,
             send_message,
             stop_session,
+            get_projects,
+            select_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
