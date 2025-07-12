@@ -1,8 +1,11 @@
 #![allow(clippy::used_underscore_binding)]
 
 mod claude;
+mod storage;
 
-use claude::{ClaudeCLI, Message, MessageRole, Session, SessionConfig};
+use claude::{
+    ClaudeCLI, ClaudeCommandBuilder, Message, MessageRole, OutputFormat, Session, SessionConfig,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
@@ -87,11 +90,40 @@ async fn send_message(
     // Get session config
     let config = session_arc.read().await.config.clone();
 
+    // Remove existing CLI if any (no longer needed to stop)
+    {
+        let mut clis = state.active_clis.lock().await;
+        clis.remove(&session_id);
+    }
+
     // Start Claude CLI
     let mut cli = ClaudeCLI::new();
-    let mut receiver = cli
-        .start(&message, &config.permission_mode, config.working_directory)
-        .map_err(|e| format!("Failed to start Claude CLI: {e}"))?;
+
+    // Load existing session ID if available
+    if let Some(claude_session_id) = &session_arc.read().await.claude_session_id {
+        cli.set_session_id(claude_session_id.clone());
+    }
+
+    // Build command
+    let mut builder = ClaudeCommandBuilder::new()
+        .prompt(&message)
+        .print_mode()
+        .output_format(OutputFormat::StreamJson)
+        .permission_mode(&config.permission_mode)
+        .verbose();
+
+    // Resume session if we have a session ID
+    if let Some(session_id) = cli.get_session_id() {
+        builder = builder.resume(session_id);
+    }
+
+    // Set working directory
+    if let Some(dir) = config.working_directory {
+        builder = builder.working_dir(dir);
+    }
+
+    let mut receiver =
+        cli.send_message(builder).map_err(|e| format!("Failed to start Claude CLI: {e}"))?;
 
     // Store CLI instance
     state.active_clis.lock().await.insert(session_id, cli);
@@ -114,7 +146,13 @@ async fn send_message(
         // Note: We need to get state from app_handle since we're in a different task
         if let Some(state) = app_handle.try_state::<AppState>() {
             let mut clis = state.active_clis.lock().await;
-            clis.remove(&session_id_copy);
+            if let Some(cli) = clis.remove(&session_id_copy) {
+                // Get Claude session ID from CLI and save it
+                if let Some(claude_session_id) = cli.get_session_id() {
+                    session_arc_copy.write().await.claude_session_id =
+                        Some(claude_session_id.clone());
+                }
+            }
         }
     });
 
@@ -124,11 +162,7 @@ async fn send_message(
 #[tauri::command]
 async fn stop_session(state: tauri::State<'_, AppState>, session_id: Uuid) -> Result<(), String> {
     let mut clis = state.active_clis.lock().await;
-
-    if let Some(mut cli) = clis.remove(&session_id) {
-        cli.stop().await.map_err(|e| e.to_string())?;
-    }
-
+    clis.remove(&session_id);
     Ok(())
 }
 

@@ -31,7 +31,7 @@ export interface MessageContent {
 export interface Message {
   id: string;
   role: MessageRole;
-  messageType: MessageType;
+  type: MessageType; // Rust側では "type" として送信される
   content: MessageContent;
   timestamp: string;
 }

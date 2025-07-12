@@ -44,6 +44,8 @@ pub struct Session {
     pub status: SessionStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Claude CLI's internal session ID for conversation continuity
+    pub claude_session_id: Option<String>,
 }
 
 impl Session {
@@ -57,6 +59,7 @@ impl Session {
             status: SessionStatus::Active,
             created_at: now,
             updated_at: now,
+            claude_session_id: None,
         }
     }
 

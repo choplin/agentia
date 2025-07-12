@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { ClaudeAPI } from "$lib/claude";
+  import { ClaudeAPI, MessageRole, MessageType } from "$lib/claude";
   import type { Session, Message } from "$lib/claude";
 
   const api = new ClaudeAPI();
@@ -40,20 +40,35 @@
     selectedSession = session;
     const fullSession = await api.getSession(session.id);
     messages = fullSession.messages;
+    console.log("Session messages:", messages);
 
     // Set up listener for new messages
     await api.listenToSession(session.id, (message) => {
+      console.log("New message received:", JSON.stringify(message, null, 2));
+      console.log("Current messages count:", messages.length);
+      console.log(
+        "Message role:",
+        message.role,
+        "vs User:",
+        MessageRole.User,
+        "vs Assistant:",
+        MessageRole.Assistant,
+      );
+      console.log("Message type:", message.type, "vs Text:", MessageType.Text);
       messages = [...messages, message];
+      console.log("Messages after update:", messages.length);
     });
   }
 
   async function sendMessage() {
     if (!selectedSession || !inputText.trim() || isLoading) return;
 
+    const messageText = inputText.trim();
     isLoading = true;
+    inputText = "";
+
     try {
-      await api.sendMessage(selectedSession.id, inputText.trim());
-      inputText = "";
+      await api.sendMessage(selectedSession.id, messageText);
     } catch (error) {
       console.error("Failed to send message:", error);
     } finally {
@@ -97,19 +112,27 @@
     <!-- Messages Area -->
     <div class="flex-1 overflow-y-auto p-4 space-y-4">
       {#if selectedSession}
-        {#each messages as message}
-          <div class="flex {message.role === 'user' ? 'justify-end' : 'justify-start'}">
+        <div class="text-xs text-muted-foreground mb-2">
+          Messages count: {messages.length}
+        </div>
+        {#each messages as message, index}
+          <div class="flex {message.role === MessageRole.User ? 'justify-end' : 'justify-start'}">
             <div
-              class="max-w-[70%] rounded-lg px-4 py-2 {message.role === 'user'
+              class="max-w-[70%] rounded-lg px-4 py-2 {message.role === MessageRole.User
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-muted'}"
             >
-              {#if message.messageType === "text" && message.content.text}
+              <div class="text-xs opacity-50 mb-1">
+                #{index} | role: {message.role} | type: {message.type}
+              </div>
+              {#if message.type === MessageType.Text && message.content.text}
                 <p class="whitespace-pre-wrap">{message.content.text}</p>
-              {:else if message.messageType === "error" && message.content.error}
+              {:else if message.type === MessageType.Error && message.content.error}
                 <p class="text-destructive">{message.content.error}</p>
-              {:else if message.messageType === "toolUse" && message.content.toolName}
+              {:else if message.type === MessageType.ToolUse && message.content.toolName}
                 <p class="text-sm opacity-70">Tool: {message.content.toolName}</p>
+              {:else}
+                <p class="text-yellow-500">Unknown message type or missing content</p>
               {/if}
             </div>
           </div>
@@ -124,7 +147,13 @@
     <!-- Input Area -->
     {#if selectedSession}
       <div class="border-t border-border p-4">
-        <form onsubmit={sendMessage} class="flex gap-2">
+        <form
+          onsubmit={(e) => {
+            e.preventDefault();
+            sendMessage();
+          }}
+          class="flex gap-2"
+        >
           <input
             type="text"
             bind:value={inputText}
