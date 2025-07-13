@@ -1,4 +1,4 @@
-use crate::claude::Session;
+use crate::claude_code::Session;
 use anyhow::Result;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};

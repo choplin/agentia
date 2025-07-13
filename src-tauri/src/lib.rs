@@ -1,11 +1,12 @@
 #![allow(clippy::used_underscore_binding)]
 
-mod claude;
+mod claude_code;
 mod db;
 mod storage;
 
-use claude::{
-    ClaudeCLI, ClaudeCommandBuilder, Message, MessageRole, OutputFormat, Session, SessionConfig,
+use claude_code::{
+    ClaudeCLI, ClaudeCommandBuilder, Message, MessageContent, MessageRole, MessageType,
+    OutputFormat, Session, SessionConfig,
 };
 use db::Database;
 use std::collections::HashMap;
@@ -73,35 +74,168 @@ async fn get_session(
     state: tauri::State<'_, AppState>,
     session_id: Uuid,
 ) -> Result<Session, String> {
+    // First check if session is in memory
     let sessions = state.sessions.read().await;
-
     if let Some(session_arc) = sessions.get(&session_id) {
-        Ok(session_arc.read().await.clone())
-    } else {
-        Err("Session not found".to_string())
+        let mut session = session_arc.read().await.clone();
+
+        // Always load messages from Claude Code file if available
+        if let Some(file_path) = &session.claude_session_id {
+            if let Ok(entries) = claude_code::read_session_file(file_path) {
+                session.messages = convert_claude_entries_to_messages(entries);
+            }
+        }
+
+        return Ok(session);
     }
+
+    // Not in memory, try to load from DB
+    let db = state.db.lock().await;
+    let db_sessions =
+        db.get_sessions_by_project(&session_id.to_string()).map_err(|e| e.to_string())?;
+
+    // Find the session by ID
+    for db_session in db_sessions {
+        if db_session.id == session_id.to_string() {
+            let config = if let Some(config_json) = &db_session.config {
+                serde_json::from_str(config_json).unwrap_or_default()
+            } else {
+                SessionConfig::default()
+            };
+
+            let mut session = Session {
+                id: session_id,
+                title: db_session.title.clone(),
+                config,
+                messages: Vec::new(),
+                status: claude_code::session::SessionStatus::Completed,
+                created_at: db_session.created_at,
+                updated_at: db_session.updated_at,
+                claude_session_id: db_session.claude_session_id.clone(),
+            };
+
+            // Load messages from Claude Code file
+            if let Some(file_path) = &db_session.claude_session_id {
+                if let Ok(entries) = claude_code::read_session_file(file_path) {
+                    session.messages = convert_claude_entries_to_messages(entries);
+                }
+            }
+
+            // Cache in memory
+            let session_arc = Arc::new(RwLock::new(session.clone()));
+            state.sessions.write().await.insert(session_id, session_arc);
+
+            return Ok(session);
+        }
+    }
+
+    Err("Session not found".to_string())
 }
 
 #[tauri::command]
 async fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<Session>, String> {
-    // Get current project ID
-    let project_id = {
-        let current_project = state.current_project_id.read().await;
-        current_project.clone().ok_or("No project selected")?
+    // Get current project ID and path
+    let (project_id, project_path) = {
+        let current_project_id = state.current_project_id.read().await;
+        let project_id = current_project_id.clone().ok_or("No project selected")?;
+
+        // Get project path
+        let db = state.db.lock().await;
+        let project =
+            db.get_project(&project_id).map_err(|e| e.to_string())?.ok_or("Project not found")?;
+        (project_id, project.path)
     };
 
-    // Get sessions from DB for current project
+    // Get all Claude Code sessions for this project
+    let claude_sessions = claude_code::list_existing_sessions(&project_path).unwrap_or_default();
+
+    // Get DB sessions
     let db_sessions =
         state.db.lock().await.get_sessions_by_project(&project_id).map_err(|e| e.to_string())?;
 
-    // Get in-memory sessions that match DB sessions
+    // Create a map of claude_session_id to DB session
+    let mut db_session_map = std::collections::HashMap::new();
+    for db_session in db_sessions {
+        if let Some(claude_id) = &db_session.claude_session_id {
+            db_session_map.insert(claude_id.clone(), db_session);
+        }
+    }
+
     let sessions = state.sessions.read().await;
     let mut result = Vec::new();
 
-    for db_session in db_sessions {
-        if let Ok(session_uuid) = Uuid::parse_str(&db_session.id) {
-            if let Some(session_arc) = sessions.get(&session_uuid) {
-                result.push(session_arc.read().await.clone());
+    // Process all Claude Code sessions
+    for claude_session in claude_sessions {
+        let file_path = claude_session.file_path.clone();
+
+        // Check if we have this session in DB
+        if let Some(db_session) = db_session_map.get(&file_path) {
+            // Session exists in DB, use it
+            if let Ok(session_uuid) = Uuid::parse_str(&db_session.id) {
+                if let Some(session_arc) = sessions.get(&session_uuid) {
+                    result.push(session_arc.read().await.clone());
+                } else {
+                    // Not in memory, recreate from DB
+                    let config = if let Some(config_json) = &db_session.config {
+                        serde_json::from_str(config_json).unwrap_or_default()
+                    } else {
+                        SessionConfig::default()
+                    };
+
+                    let session = Session {
+                        id: session_uuid,
+                        title: db_session.title.clone(),
+                        config,
+                        messages: Vec::new(),
+                        status: claude_code::session::SessionStatus::Completed,
+                        created_at: db_session.created_at,
+                        updated_at: db_session.updated_at,
+                        claude_session_id: Some(file_path.clone()),
+                    };
+                    result.push(session);
+                }
+            }
+        } else {
+            // New Claude Code session not in DB yet
+            // Create a new DB entry for it
+            let title = claude_session
+                .first_user_message
+                .as_deref()
+                .unwrap_or("Claude Code Session")
+                .chars()
+                .take(100)
+                .collect::<String>();
+
+            let config = SessionConfig {
+                model: "claude-3-5-sonnet-20241022".to_string(),
+                temperature: None,
+                max_tokens: None,
+                permission_mode: "default".to_string(),
+                working_directory: Some(project_path.clone()),
+            };
+
+            let config_json = serde_json::to_string(&config).unwrap_or_default();
+
+            // Create in DB
+            if let Ok(db_session) = state.db.lock().await.create_session(
+                &project_id,
+                Some(&file_path),
+                &title,
+                Some(&config_json),
+            ) {
+                if let Ok(session_uuid) = Uuid::parse_str(&db_session.id) {
+                    let session = Session {
+                        id: session_uuid,
+                        title,
+                        config,
+                        messages: Vec::new(),
+                        status: claude_code::session::SessionStatus::Completed,
+                        created_at: claude_session.start_time.unwrap_or_else(chrono::Utc::now),
+                        updated_at: claude_session.start_time.unwrap_or_else(chrono::Utc::now),
+                        claude_session_id: Some(file_path),
+                    };
+                    result.push(session);
+                }
             }
         }
     }
@@ -257,6 +391,11 @@ async fn create_project(
     Ok(project)
 }
 
+/// Convert Claude Code entries to agentia messages
+fn convert_claude_entries_to_messages(entries: Vec<claude_code::SessionLogEntry>) -> Vec<Message> {
+    entries.into_iter().filter_map(|entry| entry.to_internal_message()).collect()
+}
+
 /// Run the Tauri application
 ///
 /// # Panics
@@ -339,7 +478,7 @@ pub fn run() {
                             title: db_session.title,
                             config,
                             messages: Vec::new(),
-                            status: claude::session::SessionStatus::Completed,
+                            status: claude_code::session::SessionStatus::Completed,
                             created_at: db_session.created_at,
                             updated_at: db_session.updated_at,
                             claude_session_id: db_session.claude_session_id,

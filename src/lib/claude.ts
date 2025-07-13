@@ -52,6 +52,7 @@ export interface Session {
   status: SessionStatus;
   createdAt: string;
   updatedAt: string;
+  claudeSessionId?: string;
 }
 
 export interface Project {

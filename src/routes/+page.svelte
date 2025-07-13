@@ -142,14 +142,25 @@
       {#each sessions as session}
         <button
           onclick={() => selectSession(session)}
-          class="w-full px-4 py-3 text-left hover:bg-accent hover:text-accent-foreground transition-colors {selectedSession?.id ===
+          class="w-full px-4 py-3 text-left transition-colors relative {selectedSession?.id ===
           session.id
-            ? 'bg-accent text-accent-foreground'
-            : ''}"
+            ? 'bg-primary text-primary-foreground'
+            : 'hover:bg-accent hover:text-accent-foreground'}"
         >
-          <div class="font-medium">{session.title}</div>
-          <div class="text-sm text-muted-foreground">
-            {new Date(session.createdAt).toLocaleDateString()}
+          {#if selectedSession?.id === session.id}
+            <div class="absolute left-0 top-0 bottom-0 w-1 bg-primary-foreground"></div>
+          {/if}
+          <div class="font-medium {selectedSession?.id === session.id ? 'font-bold' : ''}">
+            {session.title}
+          </div>
+          <div
+            class="text-sm {selectedSession?.id === session.id
+              ? 'text-primary-foreground/80'
+              : 'text-muted-foreground'}"
+          >
+            {new Date(session.createdAt).toLocaleDateString()} • {new Date(
+              session.createdAt,
+            ).toLocaleTimeString()}
           </div>
         </button>
       {/each}
@@ -158,12 +169,19 @@
 
   <!-- Main Content -->
   <div class="flex-1 flex flex-col">
+    <!-- Session Header -->
+    {#if selectedSession}
+      <div class="border-b border-border p-4 bg-card">
+        <h2 class="text-lg font-semibold">{selectedSession.title}</h2>
+        <div class="text-sm text-muted-foreground">
+          Created: {new Date(selectedSession.createdAt).toLocaleString()} • Messages: {messages.length}
+        </div>
+      </div>
+    {/if}
+
     <!-- Messages Area -->
     <div class="flex-1 overflow-y-auto p-4 space-y-4">
       {#if selectedSession}
-        <div class="text-xs text-muted-foreground mb-2">
-          Messages count: {messages.length}
-        </div>
         {#each messages as message, index}
           <div class="flex {message.role === MessageRole.User ? 'justify-end' : 'justify-start'}">
             <div
@@ -171,15 +189,37 @@
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-muted'}"
             >
-              <div class="text-xs opacity-50 mb-1">
-                #{index} | role: {message.role} | type: {message.type}
-              </div>
               {#if message.type === MessageType.Text && message.content.text}
                 <p class="whitespace-pre-wrap">{message.content.text}</p>
               {:else if message.type === MessageType.Error && message.content.error}
-                <p class="text-destructive">{message.content.error}</p>
+                <p class="text-destructive font-semibold">Error: {message.content.error}</p>
               {:else if message.type === MessageType.ToolUse && message.content.toolName}
-                <p class="text-sm opacity-70">Tool: {message.content.toolName}</p>
+                <div class="space-y-1">
+                  <p class="text-sm font-semibold flex items-center gap-2">
+                    <span class="inline-block w-4 h-4 bg-current rounded-full animate-pulse"></span>
+                    Tool: {message.content.toolName}
+                  </p>
+                  {#if message.content.toolInput}
+                    <pre class="text-xs bg-black/10 p-2 rounded overflow-x-auto">{JSON.stringify(
+                        message.content.toolInput,
+                        null,
+                        2,
+                      )}</pre>
+                  {/if}
+                </div>
+              {:else if message.type === MessageType.ToolResult}
+                <div class="text-sm">
+                  <p class="font-semibold mb-1">Tool Result:</p>
+                  {#if message.content.toolResult}
+                    <pre class="text-xs bg-black/10 p-2 rounded overflow-x-auto">{JSON.stringify(
+                        message.content.toolResult,
+                        null,
+                        2,
+                      )}</pre>
+                  {:else if message.content.text}
+                    <p class="whitespace-pre-wrap">{message.content.text}</p>
+                  {/if}
+                </div>
               {:else}
                 <p class="text-yellow-500">Unknown message type or missing content</p>
               {/if}
