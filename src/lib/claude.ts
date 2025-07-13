@@ -126,6 +126,10 @@ export class ClaudeAPI {
     return invoke<void>("select_project", { projectId });
   }
 
+  async createProject(name: string, path: string): Promise<Project> {
+    return invoke<Project>("create_project", { name, path });
+  }
+
   cleanup() {
     // Clean up all listeners
     for (const unlisten of this.listeners.values()) {

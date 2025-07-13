@@ -243,6 +243,20 @@ async fn select_project(
     Ok(())
 }
 
+#[tauri::command]
+async fn create_project(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    path: String,
+) -> Result<db::models::Project, String> {
+    let project = state.db.lock().await.create_project(&path, &name).map_err(|e| e.to_string())?;
+
+    // Set as current project
+    *state.current_project_id.write().await = Some(project.id.clone());
+
+    Ok(project)
+}
+
 /// Run the Tauri application
 ///
 /// # Panics
@@ -257,6 +271,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Initialize database
             let db = Database::new(app.handle()).expect("Failed to initialize database");
@@ -349,6 +364,7 @@ pub fn run() {
             stop_session,
             get_projects,
             select_project,
+            create_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

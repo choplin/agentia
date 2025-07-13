@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { ClaudeAPI, MessageRole, MessageType } from "$lib/claude";
-  import type { Session, Message } from "$lib/claude";
+  import type { Session, Message, Project } from "$lib/claude";
+  import ProjectSelector from "$lib/components/ProjectSelector.svelte";
+  import CreateProjectDialog from "$lib/components/CreateProjectDialog.svelte";
 
   const api = new ClaudeAPI();
 
@@ -11,9 +13,25 @@
   let inputText = $state("");
   let isLoading = $state(false);
 
+  let projects = $state<Project[]>([]);
+  let currentProject = $state<Project | null>(null);
+  let showCreateProjectDialog = $state(false);
+
   onMount(async () => {
+    await loadProjects();
     await loadSessions();
   });
+
+  async function loadProjects() {
+    try {
+      projects = await api.getProjects();
+      if (projects.length > 0) {
+        currentProject = projects[0];
+      }
+    } catch (error) {
+      console.error("Failed to load projects:", error);
+    }
+  }
 
   async function loadSessions() {
     try {
@@ -75,11 +93,42 @@
       isLoading = false;
     }
   }
+
+  async function handleProjectSelect(project: Project) {
+    try {
+      await api.selectProject(project.id);
+      currentProject = project;
+      // Reload sessions for the new project
+      selectedSession = null;
+      messages = [];
+      await loadSessions();
+    } catch (error) {
+      console.error("Failed to select project:", error);
+    }
+  }
+
+  async function handleProjectCreated(project: Project) {
+    projects = [...projects, project];
+    currentProject = project;
+    // Clear sessions for new project
+    sessions = [];
+    selectedSession = null;
+    messages = [];
+  }
 </script>
 
 <main class="flex h-screen bg-background text-foreground">
   <!-- Sidebar -->
   <aside class="w-64 border-r border-border bg-card flex flex-col">
+    <div class="p-4 border-b border-border">
+      <ProjectSelector
+        {projects}
+        {currentProject}
+        onProjectSelect={handleProjectSelect}
+        onProjectCreate={() => (showCreateProjectDialog = true)}
+      />
+    </div>
+
     <div class="p-4 border-b border-border">
       <button
         onclick={createNewSession}
@@ -173,3 +222,9 @@
     {/if}
   </div>
 </main>
+
+<CreateProjectDialog
+  isOpen={showCreateProjectDialog}
+  onClose={() => (showCreateProjectDialog = false)}
+  onProjectCreated={handleProjectCreated}
+/>
