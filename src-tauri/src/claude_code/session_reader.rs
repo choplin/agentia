@@ -53,8 +53,8 @@ pub fn list_existing_sessions(project_path: &str) -> Result<Vec<ExistingSession>
     let mut sessions = Vec::new();
 
     // Read all .jsonl files in the directory
-    let entries = fs::read_dir(&claude_projects_dir)
-        .map_err(|e| format!("Failed to read directory: {e}"))?;
+    let entries =
+        fs::read_dir(&claude_projects_dir).map_err(|e| format!("Failed to read directory: {e}"))?;
 
     for entry in entries {
         let entry = entry.map_err(|e| format!("Failed to read directory entry: {e}"))?;
@@ -137,8 +137,7 @@ fn read_session_summary(file_path: &Path, project_path: &str) -> Result<Existing
     // Count total lines if we need more info
     if session_id.is_some() && !is_summary_only {
         // Reopen file to count all lines
-        let file2 =
-            fs::File::open(file_path).map_err(|e| format!("Failed to reopen file: {e}"))?;
+        let file2 = fs::File::open(file_path).map_err(|e| format!("Failed to reopen file: {e}"))?;
         let reader2 = BufReader::new(file2);
         message_count = lines_read + reader2.lines().count();
     }
