@@ -4,7 +4,8 @@ mod claude_code;
 mod db;
 
 use claude_code::{
-    ClaudeCLI, ClaudeCommandBuilder, Message, MessageRole, OutputFormat, Session, SessionConfig,
+    extract_session_uuid, ClaudeCLI, ClaudeCommandBuilder, Message, MessageRole, OutputFormat,
+    Session, SessionConfig,
 };
 use db::Database;
 use std::collections::HashMap;
@@ -251,8 +252,14 @@ async fn send_message(
         .verbose();
 
     // Resume session if we have a Claude session ID
-    if let Some(claude_session_id) = cli.get_session_id() {
-        builder = builder.resume(claude_session_id);
+    if let Some(claude_session_path) = cli.get_session_id() {
+        // Extract UUID from file path for --resume option
+        if let Some(uuid) = extract_session_uuid(&claude_session_path) {
+            println!("Resuming Claude session with UUID: {uuid}");
+            builder = builder.resume(uuid);
+        } else {
+            println!("Warning: Could not extract UUID from session path: {claude_session_path}");
+        }
     }
 
     // Set working directory
