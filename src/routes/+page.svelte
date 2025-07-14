@@ -5,6 +5,7 @@
   import ProjectSelector from "$lib/components/ProjectSelector.svelte";
   import CreateProjectDialog from "$lib/components/CreateProjectDialog.svelte";
   import MarkdownRenderer from "$lib/components/MarkdownRenderer.svelte";
+  import ToolMessage from "$lib/components/ToolMessage.svelte";
 
   const api = new ClaudeAPI();
 
@@ -244,46 +245,32 @@
     >
       {#if selectedSession}
         {#each messages as message, index}
-          <div class="flex {message.role === MessageRole.User ? 'justify-end' : 'justify-start'}">
-            <div
-              class="max-w-[70%] rounded-lg px-4 py-2 {message.role === MessageRole.User
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted'}"
-            >
-              {#if message.type === MessageType.Text && message.content.text}
-                <MarkdownRenderer content={message.content.text} />
-              {:else if message.type === MessageType.Error && message.content.error}
-                <p class="text-destructive font-semibold">Error: {message.content.error}</p>
-              {:else if message.type === MessageType.ToolUse && message.content.toolName}
-                <div class="space-y-1">
-                  <p class="text-sm font-semibold flex items-center gap-2">
-                    <span class="inline-block w-4 h-4 bg-current rounded-full animate-pulse"></span>
-                    Tool: {message.content.toolName}
-                  </p>
-                  {#if message.content.toolInput}
-                    <pre class="text-xs bg-black/10 p-2 rounded overflow-x-auto">{JSON.stringify(
-                        message.content.toolInput,
-                        null,
-                        2,
-                      )}</pre>
-                  {/if}
-                </div>
-              {:else if message.type === MessageType.ToolResult}
-                <div class="text-sm">
-                  <p class="font-semibold mb-1">Tool Result:</p>
-                  {#if message.content.toolResult}
-                    <pre class="text-xs bg-black/10 p-2 rounded overflow-x-auto">{JSON.stringify(
-                        message.content.toolResult,
-                        null,
-                        2,
-                      )}</pre>
-                  {:else if message.content.text}
+          <div class="message-wrapper {message.role === MessageRole.User ? 'user' : 'assistant'}">
+            <div class="flex {message.role === MessageRole.User ? 'justify-end' : 'justify-start'}">
+              <div class="message-container">
+                <div
+                  class="message-bubble rounded-lg px-4 py-2 {message.role === MessageRole.User
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted'}"
+                >
+                  {#if message.type === MessageType.Text && message.content.text}
                     <MarkdownRenderer content={message.content.text} />
+                  {:else if message.type === MessageType.Error && message.content.error}
+                    <p class="text-destructive font-semibold">Error: {message.content.error}</p>
+                  {:else if message.type === MessageType.ToolUse}
+                    <ToolMessage content={message.content} isToolUse={true} />
+                  {:else if message.type === MessageType.ToolResult}
+                    <ToolMessage content={message.content} isToolUse={false} />
+                  {:else}
+                    <p class="text-yellow-500">Unknown message type or missing content</p>
                   {/if}
                 </div>
-              {:else}
-                <p class="text-yellow-500">Unknown message type or missing content</p>
-              {/if}
+                {#if message.timestamp}
+                  <div class="message-timestamp">
+                    {new Date(message.timestamp).toLocaleTimeString()}
+                  </div>
+                {/if}
+              </div>
             </div>
           </div>
         {/each}
@@ -371,5 +358,36 @@
 
   .animate-fade-in {
     animation: fade-in 0.3s ease-out;
+  }
+
+  .message-wrapper {
+    margin-bottom: 0.75rem;
+  }
+
+  .message-wrapper:last-child {
+    margin-bottom: 0;
+  }
+
+  .message-container {
+    max-width: 70%;
+  }
+
+  .message-bubble {
+    position: relative;
+  }
+
+  .message-timestamp {
+    font-size: 0.75rem;
+    color: rgb(148 163 184);
+    margin-top: 0.25rem;
+    padding: 0 0.25rem;
+  }
+
+  .message-wrapper.user .message-timestamp {
+    text-align: right;
+  }
+
+  .message-wrapper.assistant .message-timestamp {
+    text-align: left;
   }
 </style>
