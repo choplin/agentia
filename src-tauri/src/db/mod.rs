@@ -4,9 +4,8 @@ use tauri::{AppHandle, Manager};
 
 pub mod migrations;
 pub mod models;
-pub mod repositories;
-
-use repositories::{ProjectRepository, SessionRepository};
+pub mod project;
+pub mod session;
 
 pub struct Database {
     conn: Connection,
@@ -32,26 +31,26 @@ impl Database {
         Ok(())
     }
 
+    // Convenience methods that delegate to modules
+
+    // Project methods
     pub fn create_project(&self, path: &str, name: &str) -> Result<models::Project> {
-        let repo = ProjectRepository::new(&self.conn);
-        repo.create(path, name)
+        project::create(&self.conn, path, name)
     }
 
     pub fn get_projects(&self) -> Result<Vec<models::Project>> {
-        let repo = ProjectRepository::new(&self.conn);
-        repo.find_all()
+        project::find_all(&self.conn)
     }
 
     pub fn get_project_by_path(&self, path: &str) -> Result<Option<models::Project>> {
-        let repo = ProjectRepository::new(&self.conn);
-        repo.find_by_path(path)
+        project::find_by_path(&self.conn, path)
     }
 
     pub fn get_project(&self, id: &str) -> Result<Option<models::Project>> {
-        let repo = ProjectRepository::new(&self.conn);
-        repo.find_by_id(id)
+        project::find_by_id(&self.conn, id)
     }
 
+    // Session methods
     pub fn create_session(
         &self,
         project_id: &str,
@@ -59,8 +58,7 @@ impl Database {
         title: &str,
         config: Option<&str>,
     ) -> Result<models::Session> {
-        let repo = SessionRepository::new(&self.conn);
-        repo.create(project_id, claude_session_id, title, config)
+        session::create(&self.conn, project_id, claude_session_id, title, config)
     }
 
     pub fn update_session_claude_id(
@@ -68,18 +66,14 @@ impl Database {
         session_id: &str,
         claude_session_id: &str,
     ) -> Result<()> {
-        let repo = SessionRepository::new(&self.conn);
-        repo.update_claude_session_id(session_id, claude_session_id)
+        session::update_claude_session_id(&self.conn, session_id, claude_session_id)
     }
 
     pub fn get_sessions_by_project(&self, project_id: &str) -> Result<Vec<models::Session>> {
-        let repo = SessionRepository::new(&self.conn);
-        repo.find_by_project(project_id)
+        session::find_by_project(&self.conn, project_id)
     }
 
-    #[allow(dead_code)]
     pub fn get_session(&self, session_id: &str) -> Result<Option<models::Session>> {
-        let repo = SessionRepository::new(&self.conn);
-        repo.find_by_id(session_id)
+        session::find_by_id(&self.conn, session_id)
     }
 }

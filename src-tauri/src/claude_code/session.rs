@@ -62,9 +62,4 @@ impl Session {
             claude_session_id: None,
         }
     }
-
-    pub fn add_message(&mut self, message: Message) {
-        self.messages.push(message);
-        self.updated_at = Utc::now();
-    }
 }

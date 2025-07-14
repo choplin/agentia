@@ -1,3 +1,4 @@
+use crate::claude_code::{Message, MessageContent, MessageRole, MessageType};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -175,7 +176,7 @@ pub struct ErrorDetail {
 /// Convert a Claude message (either format) to our internal Message format
 #[allow(dead_code)]
 impl ClaudeMessage {
-    pub fn to_internal_message(&self) -> Option<crate::Message> {
+    pub fn to_internal_message(&self) -> Option<Message> {
         match self {
             ClaudeMessage::SessionLog(entry) => entry.to_internal_message(),
             ClaudeMessage::StreamResponse(_) => None, // Streaming responses are handled differently
@@ -184,7 +185,7 @@ impl ClaudeMessage {
 }
 
 impl SessionLogEntry {
-    pub fn to_internal_message(&self) -> Option<crate::Message> {
+    pub fn to_internal_message(&self) -> Option<Message> {
         // Skip summary entries and meta entries
         if self.entry_type == "summary" || self.is_meta == Some(true) {
             return None;
@@ -208,11 +209,11 @@ impl SessionLogEntry {
                         .join("\n"),
                 };
 
-                Some(crate::Message {
+                Some(Message {
                     id,
-                    role: crate::MessageRole::User,
-                    message_type: crate::MessageType::Text,
-                    content: crate::MessageContent {
+                    role: MessageRole::User,
+                    message_type: MessageType::Text,
+                    content: MessageContent {
                         text: Some(text),
                         tool_name: None,
                         tool_input: None,
@@ -229,11 +230,11 @@ impl SessionLogEntry {
                     if let Some(first_item) = content.first() {
                         match first_item {
                             ContentItem::Text { text } => {
-                                return Some(crate::Message {
+                                return Some(Message {
                                     id,
-                                    role: crate::MessageRole::Assistant,
-                                    message_type: crate::MessageType::Text,
-                                    content: crate::MessageContent {
+                                    role: MessageRole::Assistant,
+                                    message_type: MessageType::Text,
+                                    content: MessageContent {
                                         text: Some(text.clone()),
                                         tool_name: None,
                                         tool_input: None,
@@ -244,11 +245,11 @@ impl SessionLogEntry {
                                 });
                             }
                             ContentItem::ToolUse { name, input, .. } => {
-                                return Some(crate::Message {
+                                return Some(Message {
                                     id,
-                                    role: crate::MessageRole::Assistant,
-                                    message_type: crate::MessageType::ToolUse,
-                                    content: crate::MessageContent {
+                                    role: MessageRole::Assistant,
+                                    message_type: MessageType::ToolUse,
+                                    content: MessageContent {
                                         text: None,
                                         tool_name: Some(name.clone()),
                                         tool_input: Some(input.clone()),

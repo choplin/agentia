@@ -2,7 +2,7 @@
 # https://lefthook.dev/configuration/
 
 pre-commit:
-  parallel: true
+  parallel: false
   jobs:
     # TypeScript/JavaScript formatting
     - name: prettier

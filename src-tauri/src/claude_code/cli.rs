@@ -164,6 +164,7 @@ impl InputFormat {
 /// Builder pattern for Claude CLI commands
 #[derive(Default)]
 #[allow(clippy::struct_excessive_bools)]
+#[allow(dead_code)]
 pub struct ClaudeCommandBuilder {
     // Required
     prompt: Option<String>,
