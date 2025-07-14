@@ -4,6 +4,7 @@
   import type { Session, Message, Project } from "$lib/claude";
   import ProjectSelector from "$lib/components/ProjectSelector.svelte";
   import CreateProjectDialog from "$lib/components/CreateProjectDialog.svelte";
+  import MarkdownRenderer from "$lib/components/MarkdownRenderer.svelte";
 
   const api = new ClaudeAPI();
 
@@ -190,7 +191,7 @@
                 : 'bg-muted'}"
             >
               {#if message.type === MessageType.Text && message.content.text}
-                <p class="whitespace-pre-wrap">{message.content.text}</p>
+                <MarkdownRenderer content={message.content.text} />
               {:else if message.type === MessageType.Error && message.content.error}
                 <p class="text-destructive font-semibold">Error: {message.content.error}</p>
               {:else if message.type === MessageType.ToolUse && message.content.toolName}
@@ -217,7 +218,7 @@
                         2,
                       )}</pre>
                   {:else if message.content.text}
-                    <p class="whitespace-pre-wrap">{message.content.text}</p>
+                    <MarkdownRenderer content={message.content.text} />
                   {/if}
                 </div>
               {:else}
