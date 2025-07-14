@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { ClaudeAPI, MessageRole, MessageType } from "$lib/claude";
   import type { Session, Message, Project } from "$lib/claude";
   import ProjectSelector from "$lib/components/ProjectSelector.svelte";
@@ -17,6 +17,12 @@
   let projects = $state<Project[]>([]);
   let currentProject = $state<Project | null>(null);
   let showCreateProjectDialog = $state(false);
+
+  // Auto-scroll state
+  let messagesContainer: HTMLDivElement;
+  let shouldAutoScroll = $state(true);
+  let isUserScrolling = false;
+  let scrollTimeout: number | null = null;
 
   onMount(async () => {
     await loadProjects();
@@ -76,6 +82,11 @@
       console.log("Message type:", message.type, "vs Text:", MessageType.Text);
       messages = [...messages, message];
       console.log("Messages after update:", messages.length);
+
+      // Auto-scroll to bottom on new message
+      if (shouldAutoScroll) {
+        tick().then(scrollToBottom);
+      }
     });
   }
 
@@ -85,6 +96,9 @@
     const messageText = inputText.trim();
     isLoading = true;
     inputText = "";
+
+    // Enable auto-scroll when sending a message
+    shouldAutoScroll = true;
 
     try {
       await api.sendMessage(selectedSession.id, messageText);
@@ -116,6 +130,48 @@
     selectedSession = null;
     messages = [];
   }
+
+  function scrollToBottom() {
+    if (messagesContainer) {
+      messagesContainer.scrollTo({
+        top: messagesContainer.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }
+
+  function handleScroll() {
+    if (!messagesContainer) return;
+
+    // Clear existing timeout
+    if (scrollTimeout) {
+      clearTimeout(scrollTimeout);
+    }
+
+    // Set flag to indicate user is scrolling
+    isUserScrolling = true;
+
+    // Check if user is near bottom (within 100px)
+    const isNearBottom =
+      messagesContainer.scrollHeight -
+        messagesContainer.scrollTop -
+        messagesContainer.clientHeight <
+      100;
+
+    shouldAutoScroll = isNearBottom;
+
+    // Reset user scrolling flag after a delay
+    scrollTimeout = window.setTimeout(() => {
+      isUserScrolling = false;
+    }, 150);
+  }
+
+  // Scroll to bottom when selected session changes
+  $effect(() => {
+    if (selectedSession && messages.length > 0) {
+      tick().then(scrollToBottom);
+    }
+  });
 </script>
 
 <main class="flex h-screen bg-background text-foreground">
@@ -181,7 +237,11 @@
     {/if}
 
     <!-- Messages Area -->
-    <div class="flex-1 overflow-y-auto p-4 space-y-4">
+    <div
+      bind:this={messagesContainer}
+      onscroll={handleScroll}
+      class="flex-1 overflow-y-auto p-4 space-y-4 relative"
+    >
       {#if selectedSession}
         {#each messages as message, index}
           <div class="flex {message.role === MessageRole.User ? 'justify-end' : 'justify-start'}">
@@ -232,6 +292,33 @@
           Select or create a session to start
         </div>
       {/if}
+
+      <!-- Scroll to bottom button -->
+      {#if !shouldAutoScroll && messages.length > 0}
+        <button
+          onclick={() => {
+            shouldAutoScroll = true;
+            scrollToBottom();
+          }}
+          class="absolute bottom-4 right-4 bg-primary text-primary-foreground rounded-full p-3 shadow-lg hover:bg-primary/90 transition-all duration-200 flex items-center gap-2 animate-fade-in"
+          aria-label="Scroll to bottom"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="m7 13 5 5 5-5" />
+            <path d="m7 6 5 5 5-5" />
+          </svg>
+        </button>
+      {/if}
     </div>
 
     <!-- Input Area -->
@@ -269,3 +356,20 @@
   onClose={() => (showCreateProjectDialog = false)}
   onProjectCreated={handleProjectCreated}
 />
+
+<style>
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-fade-in {
+    animation: fade-in 0.3s ease-out;
+  }
+</style>
