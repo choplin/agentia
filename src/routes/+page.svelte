@@ -6,6 +6,8 @@
   import SidePanelSection from "$lib/components/layout/SidePanelSection.svelte";
   import MainContent from "$lib/components/layout/MainContent.svelte";
   import Breadcrumb from "$lib/components/layout/Breadcrumb.svelte";
+  import { Button } from "$lib/components/ui/button";
+  import * as Card from "$lib/components/ui/card";
 
   // State
   let currentView = $state("sessions");
@@ -95,56 +97,50 @@
   <SidePanel bind:collapsed={sidebarCollapsed}>
     <!-- Current Project -->
     <SidePanelSection title="現在のプロジェクト">
-      <div class="rounded-md bg-muted/50 p-3">
-        <div class="font-semibold">
-          {currentProject.icon}
-          {currentProject.name}
-        </div>
-        <div class="text-xs text-muted-foreground">
-          {currentProject.path}
-        </div>
-      </div>
-      <button
-        class="mt-2 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
-        onclick={() => setView("projects")}
-      >
+      <Card.Root>
+        <Card.Content class="p-3">
+          <div class="font-semibold">
+            {currentProject.icon}
+            {currentProject.name}
+          </div>
+          <div class="text-xs text-muted-foreground">
+            {currentProject.path}
+          </div>
+        </Card.Content>
+      </Card.Root>
+      <Button variant="outline" size="sm" class="mt-2 w-full" onclick={() => setView("projects")}>
         プロジェクトを変更
-      </button>
+      </Button>
     </SidePanelSection>
 
     <!-- Worktrees -->
     <SidePanelSection title="Worktrees">
       {#each worktrees as worktree}
-        <button
-          class="flex w-full items-center justify-between rounded-md px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
-        >
+        <Button variant="ghost" size="sm" class="w-full justify-start">
           <span>
             🌿 {worktree.branch}
             {#if worktree.isDefault}
               <span class="ml-1 text-xs text-primary">(default)</span>
             {/if}
           </span>
-        </button>
+        </Button>
       {/each}
-      <button
-        class="mt-2 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
-        onclick={() => setView("worktrees")}
-      >
+      <Button variant="outline" size="sm" class="mt-2 w-full" onclick={() => setView("worktrees")}>
         Worktree管理
-      </button>
+      </Button>
     </SidePanelSection>
 
     <!-- Recent Sessions -->
     <SidePanelSection title="最近のセッション" class="flex-1 overflow-y-auto">
       {#each recentSessions as session}
-        <button
-          class="mb-2 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-        >
-          <div>{session.name}</div>
-          <div class="text-xs text-muted-foreground">
-            {session.worktree} • {session.time}
+        <Button variant="ghost" size="sm" class="mb-2 h-auto w-full justify-start p-2">
+          <div class="text-left">
+            <div>{session.name}</div>
+            <div class="text-xs text-muted-foreground">
+              {session.worktree} • {session.time}
+            </div>
           </div>
-        </button>
+        </Button>
       {/each}
     </SidePanelSection>
 

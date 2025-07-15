@@ -10,7 +10,7 @@
   let { class: className, children }: Props = $props();
 </script>
 
-<div class={cn("flex flex-1 flex-col overflow-hidden bg-muted/20", className)}>
+<div class={cn("flex flex-1 flex-col overflow-hidden bg-muted/5", className)}>
   {#if children}
     {@render children()}
   {/if}
