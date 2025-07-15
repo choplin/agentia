@@ -1,186 +1,133 @@
 <script lang="ts">
-  import AppShell from "$lib/components/layout/AppShell.svelte";
-  import ActivityBar from "$lib/components/layout/ActivityBar.svelte";
-  import ActivityBarItem from "$lib/components/layout/ActivityBarItem.svelte";
-  import SidePanel from "$lib/components/layout/SidePanel.svelte";
-  import SidePanelSection from "$lib/components/layout/SidePanelSection.svelte";
-  import MainContent from "$lib/components/layout/MainContent.svelte";
-  import Breadcrumb from "$lib/components/layout/Breadcrumb.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
-  import {
-    Home,
-    MessageSquare,
-    FolderOpen,
-    GitBranch,
-    Settings,
-    Plug,
-    BarChart3,
-    Folder,
-  } from "lucide-svelte";
+  import { MessageSquare, GitBranch, Clock, Activity } from "lucide-svelte";
+  import { goto } from "$app/navigation";
 
-  // State
-  let currentView = $state("sessions");
-  let sidebarCollapsed = $state(false);
-
-  // Mock data
-  const currentProject = {
-    name: "agentia",
-    path: "/Users/aki/workspace/agentia",
+  // Mock data - will be fetched from API later
+  const stats = {
+    activeSessions: 3,
+    totalSessions: 127,
+    activeWorktrees: 5,
+    recentActivity: "2 hours ago",
   };
 
-  const worktrees = [
-    { branch: "main", isDefault: true },
-    { branch: "feature/ui-redesign" },
-    { branch: "feature/payment" },
+  const quickActions = [
+    { label: "Start New Session", action: () => console.log("Start new session") },
+    { label: "Resume Last Session", action: () => console.log("Resume last session") },
+    { label: "Change Project", action: () => goto("/projects") },
+    { label: "Create Worktree", action: () => goto("/worktrees") },
   ];
 
-  const recentSessions = [
-    { name: "決済API実装", time: "2時間前", worktree: "feature/payment" },
-    { name: "バグ修正#123", time: "昨日", worktree: "fix/cart-bug" },
-    { name: "リファクタリング検討", time: "3日前", worktree: "main" },
+  const recentActivities = [
+    {
+      type: "session",
+      title: "Payment API Implementation",
+      time: "2 hours ago",
+      worktree: "feature/payment",
+    },
+    { type: "worktree", title: "Created feature/ui-redesign", time: "5 hours ago" },
+    { type: "session", title: "Bug Fix #123", time: "Yesterday", worktree: "fix/cart-bug" },
+    { type: "session", title: "Refactoring Discussion", time: "3 days ago", worktree: "main" },
   ];
-
-  // Menu items
-  type MenuItem = {
-    id?: string;
-    icon?: any;
-    label?: string;
-    separator?: boolean;
-  };
-
-  const menuItems: MenuItem[] = [
-    { id: "home", icon: Home, label: "ホーム" },
-    { id: "sessions", icon: MessageSquare, label: "セッション一覧" },
-    { id: "projects", icon: FolderOpen, label: "プロジェクト管理" },
-    { id: "worktrees", icon: GitBranch, label: "Worktree管理" },
-    { separator: true },
-    { id: "settings", icon: Settings, label: "設定" },
-    { id: "mcp", icon: Plug, label: "MCP管理" },
-    { id: "stats", icon: BarChart3, label: "使用統計" },
-  ];
-
-  // Breadcrumb items
-  const breadcrumbItems = $derived([
-    { label: "プロジェクト" },
-    { label: currentProject.name },
-    { label: getViewName(currentView) },
-  ]);
-
-  function getViewName(view: string): string {
-    const names: Record<string, string> = {
-      home: "ホーム",
-      sessions: "セッション一覧",
-      projects: "プロジェクト管理",
-      worktrees: "Worktree管理",
-      settings: "設定",
-      mcp: "MCP管理",
-      stats: "使用統計",
-    };
-    return names[view] || "";
-  }
-
-  function setView(view: string) {
-    currentView = view;
-  }
 </script>
 
-<AppShell>
-  <!-- Activity Bar -->
-  <ActivityBar>
-    {#each menuItems as item}
-      {#if item.separator}
-        <ActivityBarItem separator />
-      {:else}
-        <ActivityBarItem
-          icon={item.icon}
-          label={item.label}
-          active={currentView === item.id}
-          onclick={() => item.id && setView(item.id)}
-        />
-      {/if}
-    {/each}
-  </ActivityBar>
+<div class="space-y-6">
+  <h1 class="text-3xl font-bold">Home</h1>
 
-  <!-- Side Panel -->
-  <SidePanel bind:collapsed={sidebarCollapsed}>
-    <!-- Current Project -->
-    <SidePanelSection title="現在のプロジェクト">
-      <Card.Root class="border-muted shadow-none">
-        <Card.Content class="p-3">
-          <div class="flex items-center gap-2 font-semibold">
-            <Folder class="h-4 w-4" />
-            {currentProject.name}
-          </div>
-          <div class="text-xs text-muted-foreground">
-            {currentProject.path}
-          </div>
-        </Card.Content>
-      </Card.Root>
-      <Button variant="outline" size="sm" class="mt-2 w-full" onclick={() => setView("projects")}>
-        プロジェクトを変更
-      </Button>
-    </SidePanelSection>
+  <!-- Stats Cards -->
+  <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+    <Card.Root>
+      <Card.Header class="flex flex-row items-center justify-between space-y-0 pb-2">
+        <Card.Title class="text-sm font-medium">Active Sessions</Card.Title>
+        <MessageSquare class="h-4 w-4 text-muted-foreground" />
+      </Card.Header>
+      <Card.Content>
+        <div class="text-2xl font-bold">{stats.activeSessions}</div>
+        <p class="text-xs text-muted-foreground">Currently active</p>
+      </Card.Content>
+    </Card.Root>
 
-    <!-- Worktrees -->
-    <SidePanelSection title="Worktrees">
-      {#each worktrees as worktree}
-        <Button variant="ghost" size="sm" class="w-full justify-start gap-2">
-          <GitBranch class="h-4 w-4" />
-          <span>
-            {worktree.branch}
-            {#if worktree.isDefault}
-              <span class="ml-1 text-xs text-primary">(default)</span>
-            {/if}
-          </span>
-        </Button>
-      {/each}
-      <Button variant="outline" size="sm" class="mt-2 w-full" onclick={() => setView("worktrees")}>
-        Worktree管理
-      </Button>
-    </SidePanelSection>
+    <Card.Root>
+      <Card.Header class="flex flex-row items-center justify-between space-y-0 pb-2">
+        <Card.Title class="text-sm font-medium">Total Sessions</Card.Title>
+        <MessageSquare class="h-4 w-4 text-muted-foreground" />
+      </Card.Header>
+      <Card.Content>
+        <div class="text-2xl font-bold">{stats.totalSessions}</div>
+        <p class="text-xs text-muted-foreground">All time</p>
+      </Card.Content>
+    </Card.Root>
 
-    <!-- Recent Sessions -->
-    <SidePanelSection title="最近のセッション" class="flex-1 overflow-y-auto">
-      {#each recentSessions as session}
-        <Button variant="ghost" size="sm" class="mb-2 h-auto w-full justify-start p-2">
-          <div class="text-left">
-            <div>{session.name}</div>
-            <div class="text-xs text-muted-foreground">
-              {session.worktree} • {session.time}
+    <Card.Root>
+      <Card.Header class="flex flex-row items-center justify-between space-y-0 pb-2">
+        <Card.Title class="text-sm font-medium">Active Worktrees</Card.Title>
+        <GitBranch class="h-4 w-4 text-muted-foreground" />
+      </Card.Header>
+      <Card.Content>
+        <div class="text-2xl font-bold">{stats.activeWorktrees}</div>
+        <p class="text-xs text-muted-foreground">Branches</p>
+      </Card.Content>
+    </Card.Root>
+
+    <Card.Root>
+      <Card.Header class="flex flex-row items-center justify-between space-y-0 pb-2">
+        <Card.Title class="text-sm font-medium">Last Activity</Card.Title>
+        <Clock class="h-4 w-4 text-muted-foreground" />
+      </Card.Header>
+      <Card.Content>
+        <div class="text-2xl font-bold">{stats.recentActivity}</div>
+        <p class="text-xs text-muted-foreground">Most recent activity</p>
+      </Card.Content>
+    </Card.Root>
+  </div>
+
+  <!-- Quick Actions -->
+  <Card.Root>
+    <Card.Header>
+      <Card.Title>Quick Actions</Card.Title>
+      <Card.Description>Quick access to common operations</Card.Description>
+    </Card.Header>
+    <Card.Content>
+      <div class="grid gap-2 md:grid-cols-2">
+        {#each quickActions as action}
+          <Button variant="outline" onclick={action.action}>
+            {action.label}
+          </Button>
+        {/each}
+      </div>
+    </Card.Content>
+  </Card.Root>
+
+  <!-- Recent Activity Timeline -->
+  <Card.Root>
+    <Card.Header>
+      <Card.Title>Recent Activity</Card.Title>
+      <Card.Description>Recent activity in your project</Card.Description>
+    </Card.Header>
+    <Card.Content>
+      <div class="space-y-4">
+        {#each recentActivities as activity}
+          <div class="flex items-start gap-4">
+            <div class="mt-0.5">
+              {#if activity.type === "session"}
+                <MessageSquare class="h-4 w-4 text-muted-foreground" />
+              {:else}
+                <GitBranch class="h-4 w-4 text-muted-foreground" />
+              {/if}
+            </div>
+            <div class="flex-1">
+              <p class="text-sm font-medium">{activity.title}</p>
+              <p class="text-xs text-muted-foreground">
+                {#if activity.worktree}
+                  {activity.worktree} •
+                {/if}
+                {activity.time}
+              </p>
             </div>
           </div>
-        </Button>
-      {/each}
-    </SidePanelSection>
-
-    <!-- Favorites -->
-    <SidePanelSection title="お気に入り">
-      <div class="py-4 text-center text-sm text-muted-foreground">お気に入りはありません</div>
-    </SidePanelSection>
-  </SidePanel>
-
-  <!-- Main Content -->
-  <MainContent>
-    <Breadcrumb items={breadcrumbItems} />
-
-    <div class="flex-1 p-6">
-      {#if currentView === "sessions"}
-        <h2 class="mb-6 text-2xl font-semibold">セッション一覧</h2>
-        <p class="text-muted-foreground">セッション一覧ページの内容がここに表示されます。</p>
-      {:else if currentView === "projects"}
-        <h2 class="mb-6 text-2xl font-semibold">プロジェクト管理</h2>
-        <p class="text-muted-foreground">プロジェクト管理ページの内容がここに表示されます。</p>
-      {:else if currentView === "worktrees"}
-        <h2 class="mb-6 text-2xl font-semibold">Worktree管理</h2>
-        <p class="text-muted-foreground">Worktree管理ページの内容がここに表示されます。</p>
-      {:else if currentView === "home"}
-        <h2 class="mb-6 text-2xl font-semibold">ホーム</h2>
-        <p class="text-muted-foreground">ホームページの内容がここに表示されます。</p>
-      {:else}
-        <h2 class="mb-6 text-2xl font-semibold">{getViewName(currentView)}</h2>
-        <p class="text-muted-foreground">このページは準備中です。</p>
-      {/if}
-    </div>
-  </MainContent>
-</AppShell>
+        {/each}
+      </div>
+    </Card.Content>
+  </Card.Root>
+</div>
