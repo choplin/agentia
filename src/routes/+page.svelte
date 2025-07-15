@@ -8,6 +8,16 @@
   import Breadcrumb from "$lib/components/layout/Breadcrumb.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import {
+    Home,
+    MessageSquare,
+    FolderOpen,
+    GitBranch,
+    Settings,
+    Plug,
+    BarChart3,
+    Folder,
+  } from "lucide-svelte";
 
   // State
   let currentView = $state("sessions");
@@ -16,7 +26,6 @@
   // Mock data
   const currentProject = {
     name: "agentia",
-    icon: "📁",
     path: "/Users/aki/workspace/agentia",
   };
 
@@ -35,20 +44,20 @@
   // Menu items
   type MenuItem = {
     id?: string;
-    icon?: string;
+    icon?: any;
     label?: string;
     separator?: boolean;
   };
 
   const menuItems: MenuItem[] = [
-    { id: "home", icon: "🏠", label: "ホーム" },
-    { id: "sessions", icon: "💬", label: "セッション一覧" },
-    { id: "projects", icon: "📁", label: "プロジェクト管理" },
-    { id: "worktrees", icon: "🌿", label: "Worktree管理" },
+    { id: "home", icon: Home, label: "ホーム" },
+    { id: "sessions", icon: MessageSquare, label: "セッション一覧" },
+    { id: "projects", icon: FolderOpen, label: "プロジェクト管理" },
+    { id: "worktrees", icon: GitBranch, label: "Worktree管理" },
     { separator: true },
-    { id: "settings", icon: "⚙️", label: "設定" },
-    { id: "mcp", icon: "🔌", label: "MCP管理" },
-    { id: "stats", icon: "📊", label: "使用統計" },
+    { id: "settings", icon: Settings, label: "設定" },
+    { id: "mcp", icon: Plug, label: "MCP管理" },
+    { id: "stats", icon: BarChart3, label: "使用統計" },
   ];
 
   // Breadcrumb items
@@ -97,10 +106,10 @@
   <SidePanel bind:collapsed={sidebarCollapsed}>
     <!-- Current Project -->
     <SidePanelSection title="現在のプロジェクト">
-      <Card.Root>
+      <Card.Root class="border-muted shadow-none">
         <Card.Content class="p-3">
-          <div class="font-semibold">
-            {currentProject.icon}
+          <div class="flex items-center gap-2 font-semibold">
+            <Folder class="h-4 w-4" />
             {currentProject.name}
           </div>
           <div class="text-xs text-muted-foreground">
@@ -116,9 +125,10 @@
     <!-- Worktrees -->
     <SidePanelSection title="Worktrees">
       {#each worktrees as worktree}
-        <Button variant="ghost" size="sm" class="w-full justify-start">
+        <Button variant="ghost" size="sm" class="w-full justify-start gap-2">
+          <GitBranch class="h-4 w-4" />
           <span>
-            🌿 {worktree.branch}
+            {worktree.branch}
             {#if worktree.isDefault}
               <span class="ml-1 text-xs text-primary">(default)</span>
             {/if}

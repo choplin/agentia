@@ -31,9 +31,9 @@
     onclick={toggleCollapsed}
     class={cn(
       "absolute -right-3 top-1/2 z-10 flex h-12 w-6 -translate-y-1/2 items-center justify-center",
-      "rounded-r-md border border-l-0 bg-background",
-      "hover:bg-accent hover:text-accent-foreground",
-      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+      "rounded-r border border-l-0 bg-background",
+      "hover:bg-muted",
+      "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
     )}
   >
     {#if collapsed}

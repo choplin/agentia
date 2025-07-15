@@ -2,7 +2,7 @@
   import { cn } from "$lib/utils";
 
   interface Props {
-    icon?: string;
+    icon?: any;
     label?: string;
     active?: boolean;
     separator?: boolean;
@@ -27,13 +27,16 @@
     {onclick}
     title={label}
     class={cn(
-      "flex h-10 w-10 items-center justify-center rounded-md text-xl transition-colors",
-      "hover:bg-accent hover:text-accent-foreground",
-      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-      active && "bg-accent text-accent-foreground",
+      "flex h-10 w-10 items-center justify-center rounded transition-colors",
+      "hover:bg-muted hover:text-foreground",
+      "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+      active && "bg-muted text-foreground",
       className,
     )}
   >
-    {icon}
+    {#if icon}
+      {@const Icon = icon}
+      <Icon class="h-5 w-5" />
+    {/if}
   </button>
 {/if}
