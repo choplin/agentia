@@ -64,12 +64,24 @@
 
 ### Before Committing
 
-**ALWAYS run lint, format, and tests before creating commits:**
+**ALWAYS run the precommit check before creating commits:**
 
-- `pnpm run format` - Format code with prettier
-- `pnpm run lint` - Run eslint checks
-- `pnpm run check` - Run svelte-check
-- `pnpm test` - Run tests (if available)
+```bash
+pnpm run precommit
+```
+
+This command will:
+
+- Format code with prettier and rustfmt
+- Run eslint checks
+- Run svelte-check
+- Run cargo clippy
+
+Individual commands are also available:
+
+- `pnpm run fmt` - Format code (TypeScript & Rust)
+- `pnpm run lint` - Run all lint checks
+- `pnpm run check` - Run svelte-check only
 
 ### Pre-commit Hooks
 

@@ -18,6 +18,7 @@
     "check:ts": "eslint . && prettier --check .",
     "fmt": "pnpm fmt:ts && pnpm fmt:rust",
     "lint": "pnpm lint:ts && pnpm check && pnpm lint:rust",
+    "precommit": "pnpm fmt && pnpm lint",
     "prepare": "lefthook install",
     "reset-db": "./scripts/reset-db.sh"
   },
