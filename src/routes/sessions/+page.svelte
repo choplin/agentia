@@ -1,42 +1,73 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
-  import { Trash2, Download, Search, Filter } from "lucide-svelte";
+  import { Trash2, Download, Search, Filter, PlayCircle } from "lucide-svelte";
+  import { sessions } from "$lib/stores/session";
+  import { goto } from "$app/navigation";
 
-  // Mock data - will be fetched from API later
-  const sessions = [
-    {
-      id: "1",
-      name: "Payment API Implementation",
-      status: "running",
-      worktree: "feature/payment",
-      startTime: "2024-01-15 10:30",
-      duration: "2h 15m",
-      messages: 45,
-    },
-    {
-      id: "2",
-      name: "Bug Fix #123",
-      status: "stopped",
-      worktree: "fix/cart-bug",
-      startTime: "2024-01-14 14:20",
-      duration: "1h 30m",
-      messages: 23,
-    },
-    {
-      id: "3",
-      name: "Refactoring Discussion",
-      status: "stopped",
-      worktree: "main",
-      startTime: "2024-01-12 09:00",
-      duration: "3h 45m",
-      messages: 67,
-    },
-  ];
-
+  let loading = $state(true);
+  let error = $state<string | null>(null);
   let selectedSessions = $state(new Set<string>());
   let filterStatus = $state("all");
   let searchQuery = $state("");
+
+  onMount(async () => {
+    try {
+      await sessions.load();
+    } catch (err) {
+      error = err instanceof Error ? err.message : "Failed to load sessions";
+    } finally {
+      loading = false;
+    }
+  });
+
+  // Computed filtered sessions
+  let filteredSessions = $derived(() => {
+    let filtered = $sessions;
+
+    // Filter by status
+    if (filterStatus !== "all") {
+      filtered = filtered.filter((s) => {
+        if (filterStatus === "running") return s.status === "active";
+        if (filterStatus === "stopped") return s.status === "completed" || s.status === "failed";
+        return true;
+      });
+    }
+
+    // Filter by search query
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter((s) => s.title.toLowerCase().includes(query));
+    }
+
+    return filtered;
+  });
+
+  // Helper function to format dates
+  function formatDate(dateString: string) {
+    const date = new Date(dateString);
+    return date.toLocaleString();
+  }
+
+  // Helper function to calculate duration
+  function calculateDuration(start: string, end?: string) {
+    const startDate = new Date(start);
+    const endDate = end ? new Date(end) : new Date();
+    const diff = endDate.getTime() - startDate.getTime();
+
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m`;
+  }
+
+  function viewSession(sessionId: string) {
+    goto(`/session/${sessionId}`);
+  }
 
   function toggleSelection(id: string) {
     if (selectedSessions.has(id)) {
@@ -48,10 +79,11 @@
   }
 
   function toggleSelectAll() {
-    if (selectedSessions.size === sessions.length) {
+    const filtered = filteredSessions();
+    if (selectedSessions.size === filtered.length) {
       selectedSessions = new Set();
     } else {
-      selectedSessions = new Set(sessions.map((s) => s.id));
+      selectedSessions = new Set(filtered.map((s) => s.id));
     }
   }
 </script>
@@ -99,57 +131,107 @@
     </Card.Content>
   </Card.Root>
 
-  <!-- Sessions Table -->
-  <Card.Root>
-    <Card.Content class="p-0">
-      <table class="w-full">
-        <thead class="border-b">
-          <tr>
-            <th class="p-4 text-left">
-              <input
-                type="checkbox"
-                checked={selectedSessions.size === sessions.length}
-                onchange={toggleSelectAll}
-              />
-            </th>
-            <th class="p-4 text-left text-sm font-medium">Session Name</th>
-            <th class="p-4 text-left text-sm font-medium">Status</th>
-            <th class="p-4 text-left text-sm font-medium">Worktree</th>
-            <th class="p-4 text-left text-sm font-medium">Start Time</th>
-            <th class="p-4 text-left text-sm font-medium">Duration</th>
-            <th class="p-4 text-left text-sm font-medium">Messages</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each sessions as session}
-            <tr class="border-b hover:bg-muted/50">
-              <td class="p-4">
+  {#if error}
+    <Card.Root class="bg-destructive/10">
+      <Card.Content class="pt-6">
+        <p class="text-sm text-destructive">{error}</p>
+      </Card.Content>
+    </Card.Root>
+  {/if}
+
+  {#if loading}
+    <Card.Root>
+      <Card.Content class="pt-6">
+        <p class="text-center text-muted-foreground">Loading sessions...</p>
+      </Card.Content>
+    </Card.Root>
+  {:else if filteredSessions().length === 0}
+    <Card.Root>
+      <Card.Content class="pt-6">
+        <p class="text-center text-muted-foreground">
+          {searchQuery || filterStatus !== "all"
+            ? "No sessions match your filters."
+            : "No sessions yet. Start a new session to begin!"}
+        </p>
+      </Card.Content>
+    </Card.Root>
+  {:else}
+    <!-- Sessions Table -->
+    <Card.Root>
+      <Card.Content class="p-0">
+        <table class="w-full">
+          <thead class="border-b">
+            <tr>
+              <th class="p-4 text-left">
                 <input
                   type="checkbox"
-                  checked={selectedSessions.has(session.id)}
-                  onchange={() => toggleSelection(session.id)}
+                  checked={selectedSessions.size === filteredSessions().length &&
+                    filteredSessions().length > 0}
+                  onchange={toggleSelectAll}
                 />
-              </td>
-              <td class="p-4 font-medium">{session.name}</td>
-              <td class="p-4">
-                <span
-                  class="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium"
-                  class:bg-green-100={session.status === "running"}
-                  class:text-green-700={session.status === "running"}
-                  class:bg-gray-100={session.status === "stopped"}
-                  class:text-gray-700={session.status === "stopped"}
-                >
-                  {session.status === "running" ? "Running" : "Stopped"}
-                </span>
-              </td>
-              <td class="p-4 text-sm">{session.worktree}</td>
-              <td class="p-4 text-sm">{session.startTime}</td>
-              <td class="p-4 text-sm">{session.duration}</td>
-              <td class="p-4 text-sm">{session.messages}</td>
+              </th>
+              <th class="p-4 text-left text-sm font-medium">Session Title</th>
+              <th class="p-4 text-left text-sm font-medium">Status</th>
+              <th class="p-4 text-left text-sm font-medium">Model</th>
+              <th class="p-4 text-left text-sm font-medium">Created</th>
+              <th class="p-4 text-left text-sm font-medium">Duration</th>
+              <th class="p-4 text-left text-sm font-medium">Messages</th>
+              <th class="p-4 text-right text-sm font-medium">Actions</th>
             </tr>
-          {/each}
-        </tbody>
-      </table>
-    </Card.Content>
-  </Card.Root>
+          </thead>
+          <tbody>
+            {#each filteredSessions() as session}
+              <tr
+                class="border-b hover:bg-muted/50 cursor-pointer"
+                onclick={() => viewSession(session.id)}
+              >
+                <td class="p-4" onclick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selectedSessions.has(session.id)}
+                    onchange={() => toggleSelection(session.id)}
+                  />
+                </td>
+                <td class="p-4 font-medium">{session.title}</td>
+                <td class="p-4">
+                  <span
+                    class="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium"
+                    class:bg-green-100={session.status === "active"}
+                    class:text-green-700={session.status === "active"}
+                    class:bg-gray-100={session.status === "completed"}
+                    class:text-gray-700={session.status === "completed"}
+                    class:bg-red-100={session.status === "failed"}
+                    class:text-red-700={session.status === "failed"}
+                    class:bg-yellow-100={session.status === "paused"}
+                    class:text-yellow-700={session.status === "paused"}
+                  >
+                    {session.status.charAt(0).toUpperCase() + session.status.slice(1)}
+                  </span>
+                </td>
+                <td class="p-4 text-sm">{session.config.model.split("-").slice(0, 3).join("-")}</td>
+                <td class="p-4 text-sm">{formatDate(session.createdAt)}</td>
+                <td class="p-4 text-sm"
+                  >{calculateDuration(session.createdAt, session.updatedAt)}</td
+                >
+                <td class="p-4 text-sm">{session.messages.length}</td>
+                <td class="p-4" onclick={(e) => e.stopPropagation()}>
+                  <div class="flex justify-end gap-2">
+                    {#if session.status === "active"}
+                      <Button variant="outline" size="sm" onclick={() => viewSession(session.id)}>
+                        <PlayCircle class="h-4 w-4" />
+                      </Button>
+                    {:else}
+                      <Button variant="ghost" size="sm" onclick={() => viewSession(session.id)}>
+                        View
+                      </Button>
+                    {/if}
+                  </div>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </Card.Content>
+    </Card.Root>
+  {/if}
 </div>

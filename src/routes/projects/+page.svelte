@@ -1,120 +1,223 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Plus, Trash2, FolderOpen, ExternalLink } from "lucide-svelte";
+  import { projects, currentProject } from "$lib/stores/project";
+  import { open } from "@tauri-apps/plugin-dialog";
+  import { openPath } from "@tauri-apps/plugin-opener";
 
-  // Mock data - will be fetched from API later
-  const projects = [
-    {
-      id: "1",
-      name: "agentia",
-      path: "/Users/aki/workspace/agentia",
-      description: "AI Agent Management Tool",
-      lastOpened: "2024-01-15 10:30",
-      isActive: true,
-    },
-    {
-      id: "2",
-      name: "my-project",
-      path: "/Users/aki/projects/my-project",
-      description: "Personal Project",
-      lastOpened: "2024-01-10 15:20",
-      isActive: false,
-    },
-    {
-      id: "3",
-      name: "work-project",
-      path: "/Users/aki/work/work-project",
-      description: "Work Project",
-      lastOpened: "2024-01-08 09:00",
-      isActive: false,
-    },
-  ];
+  let loading = $state(true);
+  let error = $state<string | null>(null);
+  let showNewProjectDialog = $state(false);
+  let newProjectName = $state("");
+  let newProjectPath = $state("");
 
-  function selectProject(id: string) {
-    console.log("Select project:", id);
+  onMount(async () => {
+    try {
+      await projects.load();
+    } catch (err) {
+      error = err instanceof Error ? err.message : "Failed to load projects";
+    } finally {
+      loading = false;
+    }
+  });
+
+  async function selectProject(id: string) {
+    try {
+      await currentProject.select(id);
+    } catch (err) {
+      error = err instanceof Error ? err.message : "Failed to select project";
+    }
   }
 
   function deleteProject(id: string) {
+    // TODO: Implement delete project functionality
     console.log("Delete project:", id);
   }
 
-  function openInFinder(path: string) {
-    console.log("Open in finder:", path);
+  async function openInFinder(path: string) {
+    try {
+      await openPath(path);
+    } catch (err) {
+      error = err instanceof Error ? err.message : "Failed to open folder";
+    }
+  }
+
+  async function selectProjectDirectory() {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Select Project Directory",
+    });
+
+    if (selected) {
+      newProjectPath = selected;
+      // Auto-fill project name from directory name
+      const pathParts = selected.split("/");
+      newProjectName = pathParts[pathParts.length - 1] || "";
+    }
+  }
+
+  async function createNewProject() {
+    if (!newProjectName || !newProjectPath) {
+      error = "Project name and path are required";
+      return;
+    }
+
+    try {
+      await projects.create(newProjectName, newProjectPath);
+      showNewProjectDialog = false;
+      newProjectName = "";
+      newProjectPath = "";
+    } catch (err) {
+      error = err instanceof Error ? err.message : "Failed to create project";
+    }
+  }
+
+  // Helper function to format dates
+  function formatDate(dateString: string) {
+    const date = new Date(dateString);
+    return date.toLocaleString();
   }
 </script>
 
 <div class="space-y-6">
   <div class="flex items-center justify-between">
     <h1 class="text-3xl font-bold">Projects</h1>
-    <Button>
+    <Button onclick={() => (showNewProjectDialog = true)}>
       <Plus class="mr-2 h-4 w-4" />
       New Project
     </Button>
   </div>
 
-  <!-- Projects Table -->
-  <Card.Root>
-    <Card.Content class="p-0">
-      <table class="w-full">
-        <thead class="border-b">
-          <tr>
-            <th class="p-4 text-left text-sm font-medium">Project Name</th>
-            <th class="p-4 text-left text-sm font-medium">Description</th>
-            <th class="p-4 text-left text-sm font-medium">Path</th>
-            <th class="p-4 text-left text-sm font-medium">Status</th>
-            <th class="p-4 text-left text-sm font-medium">Last Accessed</th>
-            <th class="p-4 text-right text-sm font-medium">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each projects as project}
-            <tr class="border-b hover:bg-muted/50">
-              <td class="p-4">
-                <div class="flex items-center gap-2 font-medium">
-                  <FolderOpen class="h-4 w-4" />
-                  {project.name}
-                </div>
-              </td>
-              <td class="p-4 text-sm text-muted-foreground">{project.description}</td>
-              <td class="p-4 text-sm">
-                <code class="rounded bg-muted px-2 py-1 text-xs">{project.path}</code>
-              </td>
-              <td class="p-4">
-                {#if project.isActive}
-                  <span
-                    class="inline-flex items-center rounded-full bg-primary px-2 py-1 text-xs font-medium text-primary-foreground"
-                  >
-                    Active
-                  </span>
-                {:else}
-                  <span
-                    class="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700"
-                  >
-                    Inactive
-                  </span>
-                {/if}
-              </td>
-              <td class="p-4 text-sm">{project.lastOpened}</td>
-              <td class="p-4">
-                <div class="flex justify-end gap-2">
-                  {#if !project.isActive}
-                    <Button variant="outline" size="sm" onclick={() => selectProject(project.id)}>
-                      Select
-                    </Button>
-                  {/if}
-                  <Button variant="ghost" size="icon" onclick={() => openInFinder(project.path)}>
-                    <ExternalLink class="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" onclick={() => deleteProject(project.id)}>
-                    <Trash2 class="h-4 w-4" />
-                  </Button>
-                </div>
-              </td>
+  {#if error}
+    <Card.Root class="bg-destructive/10">
+      <Card.Content class="pt-6">
+        <p class="text-sm text-destructive">{error}</p>
+      </Card.Content>
+    </Card.Root>
+  {/if}
+
+  {#if loading}
+    <Card.Root>
+      <Card.Content class="pt-6">
+        <p class="text-center text-muted-foreground">Loading projects...</p>
+      </Card.Content>
+    </Card.Root>
+  {:else if $projects.length === 0}
+    <Card.Root>
+      <Card.Content class="pt-6">
+        <p class="text-center text-muted-foreground">No projects yet. Create your first project!</p>
+      </Card.Content>
+    </Card.Root>
+  {:else}
+    <!-- Projects Table -->
+    <Card.Root>
+      <Card.Content class="p-0">
+        <table class="w-full">
+          <thead class="border-b">
+            <tr>
+              <th class="p-4 text-left text-sm font-medium">Project Name</th>
+              <th class="p-4 text-left text-sm font-medium">Description</th>
+              <th class="p-4 text-left text-sm font-medium">Path</th>
+              <th class="p-4 text-left text-sm font-medium">Status</th>
+              <th class="p-4 text-left text-sm font-medium">Last Accessed</th>
+              <th class="p-4 text-right text-sm font-medium">Actions</th>
             </tr>
-          {/each}
-        </tbody>
-      </table>
-    </Card.Content>
-  </Card.Root>
+          </thead>
+          <tbody>
+            {#each $projects as project}
+              <tr class="border-b hover:bg-muted/50">
+                <td class="p-4">
+                  <div class="flex items-center gap-2 font-medium">
+                    <FolderOpen class="h-4 w-4" />
+                    {project.name}
+                  </div>
+                </td>
+                <td class="p-4 text-sm text-muted-foreground">
+                  {project.settings ? JSON.parse(project.settings).description || "-" : "-"}
+                </td>
+                <td class="p-4 text-sm">
+                  <code class="rounded bg-muted px-2 py-1 text-xs">{project.path}</code>
+                </td>
+                <td class="p-4">
+                  {#if $currentProject?.id === project.id}
+                    <span
+                      class="inline-flex items-center rounded-full bg-primary px-2 py-1 text-xs font-medium text-primary-foreground"
+                    >
+                      Active
+                    </span>
+                  {:else}
+                    <span
+                      class="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700"
+                    >
+                      Inactive
+                    </span>
+                  {/if}
+                </td>
+                <td class="p-4 text-sm">{formatDate(project.updatedAt)}</td>
+                <td class="p-4">
+                  <div class="flex justify-end gap-2">
+                    {#if $currentProject?.id !== project.id}
+                      <Button variant="outline" size="sm" onclick={() => selectProject(project.id)}>
+                        Select
+                      </Button>
+                    {/if}
+                    <Button variant="ghost" size="icon" onclick={() => openInFinder(project.path)}>
+                      <ExternalLink class="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" onclick={() => deleteProject(project.id)}>
+                      <Trash2 class="h-4 w-4" />
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </Card.Content>
+    </Card.Root>
+  {/if}
+
+  <!-- New Project Dialog -->
+  {#if showNewProjectDialog}
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <Card.Root class="w-[500px]">
+        <Card.Header>
+          <Card.Title>Create New Project</Card.Title>
+        </Card.Header>
+        <Card.Content class="space-y-4">
+          <div>
+            <label for="project-name" class="text-sm font-medium">Project Name</label>
+            <input
+              id="project-name"
+              type="text"
+              bind:value={newProjectName}
+              class="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              placeholder="My Project"
+            />
+          </div>
+          <div>
+            <label for="project-path" class="text-sm font-medium">Project Path</label>
+            <div class="mt-1 flex gap-2">
+              <input
+                id="project-path"
+                type="text"
+                bind:value={newProjectPath}
+                class="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+                placeholder="/path/to/project"
+                readonly
+              />
+              <Button variant="outline" onclick={selectProjectDirectory}>Browse</Button>
+            </div>
+          </div>
+        </Card.Content>
+        <Card.Footer class="flex justify-end gap-2">
+          <Button variant="outline" onclick={() => (showNewProjectDialog = false)}>Cancel</Button>
+          <Button onclick={createNewProject}>Create Project</Button>
+        </Card.Footer>
+      </Card.Root>
+    </div>
+  {/if}
 </div>

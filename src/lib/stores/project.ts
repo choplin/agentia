@@ -1,14 +1,6 @@
 import { writable, derived } from "svelte/store";
-import { invoke } from "@tauri-apps/api/core";
-
-export interface Project {
-  id: string;
-  path: string;
-  name: string;
-  created_at: string;
-  updated_at: string;
-  settings?: Record<string, any>;
-}
+import { getProjects, createProject, selectProject } from "$lib/api/tauri";
+import type { Project } from "$lib/types";
 
 // Projects store
 function createProjectsStore() {
@@ -18,9 +10,9 @@ function createProjectsStore() {
     subscribe,
     async load() {
       try {
-        const projects = await invoke<Project[]>("get_projects");
-        set(projects);
-        return projects;
+        const projectsList = await getProjects();
+        set(projectsList);
+        return projectsList;
       } catch (error) {
         console.error("Failed to load projects:", error);
         throw error;
@@ -28,7 +20,7 @@ function createProjectsStore() {
     },
     async create(name: string, path: string) {
       try {
-        const project = await invoke<Project>("create_project", { name, path });
+        const project = await createProject(name, path);
         update((projects) => [...projects, project]);
         return project;
       } catch (error) {
@@ -47,9 +39,9 @@ function createCurrentProjectStore() {
     subscribe,
     async select(projectId: string) {
       try {
-        await invoke("select_project", { projectId });
-        const projects = await invoke<Project[]>("get_projects");
-        const selected = projects.find((p) => p.id === projectId);
+        await selectProject(projectId);
+        const projectsList = await getProjects();
+        const selected = projectsList.find((p) => p.id === projectId);
         if (selected) {
           set(selected);
         }
