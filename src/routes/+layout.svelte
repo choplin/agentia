@@ -24,19 +24,31 @@
     PauseCircle,
     CheckCircle,
     XCircle,
+    Sun,
+    Moon,
   } from "lucide-svelte";
   import { goto } from "$app/navigation";
   import type { Snippet } from "svelte";
   import { sessions, runningSessions } from "$lib/stores/session";
   import { projects, projectsMap } from "$lib/stores/project";
+  import { theme } from "$lib/stores/theme";
 
   let { children }: { children?: Snippet } = $props();
 
   // State
   let sidebarCollapsed = $state(false);
+  let currentTheme = $state<string>("system");
 
   // Load data on mount
   onMount(async () => {
+    // Initialize theme
+    theme.init();
+
+    // Subscribe to theme changes
+    theme.subscribe((value) => {
+      currentTheme = value;
+    });
+
     try {
       await Promise.all([sessions.load(), projects.load()]);
     } catch (error) {
@@ -155,6 +167,13 @@
         return "text-muted-foreground";
     }
   }
+
+  function toggleTheme() {
+    const themes = ["light", "dark", "system"];
+    const currentIndex = themes.indexOf(currentTheme);
+    const nextIndex = (currentIndex + 1) % themes.length;
+    theme.set(themes[nextIndex] as any);
+  }
 </script>
 
 <AppShell>
@@ -172,6 +191,16 @@
         />
       {/if}
     {/each}
+
+    <!-- Theme Toggle at the bottom -->
+    <div class="mt-auto mb-2">
+      <ActivityBarItem separator />
+      <ActivityBarItem
+        icon={currentTheme === "dark" ? Sun : Moon}
+        label={`Switch to ${currentTheme === "dark" ? "light" : currentTheme === "light" ? "system" : "dark"} mode`}
+        onclick={toggleTheme}
+      />
+    </div>
   </ActivityBar>
 
   <!-- Side Panel -->
