@@ -132,37 +132,36 @@
           </Table.Header>
           <Table.Body>
             {#each $projects as project}
-              <Table.Row>
-                <Table.Cell>
+              <Table.Row class="cursor-pointer">
+                <Table.Cell onclick={() => selectProject(project.id)}>
                   <div class="flex items-center gap-2 font-medium">
                     <FolderOpen class="h-4 w-4" />
                     {project.name}
                   </div>
                 </Table.Cell>
-                <Table.Cell class="text-muted-foreground">
+                <Table.Cell class="text-muted-foreground" onclick={() => selectProject(project.id)}>
                   {project.settings ? JSON.parse(project.settings).description || "-" : "-"}
                 </Table.Cell>
-                <Table.Cell>
+                <Table.Cell onclick={() => selectProject(project.id)}>
                   <code class="rounded bg-muted px-2 py-1 text-xs">{project.path}</code>
                 </Table.Cell>
-                <Table.Cell>
-                  <SimpleTooltip
-                    content={$currentProject?.id === project.id
-                      ? "Currently active project"
-                      : "Click 'Select' to activate"}
-                  >
-                    {#snippet children()}
-                      <Badge variant={$currentProject?.id === project.id ? "default" : "secondary"}>
-                        {$currentProject?.id === project.id ? "Active" : "Inactive"}
-                      </Badge>
-                    {/snippet}
-                  </SimpleTooltip>
+                <Table.Cell onclick={() => selectProject(project.id)}>
+                  <Badge variant={$currentProject?.id === project.id ? "default" : "secondary"}>
+                    {$currentProject?.id === project.id ? "Active" : "Inactive"}
+                  </Badge>
                 </Table.Cell>
-                <Table.Cell>{formatDate(project.updatedAt)}</Table.Cell>
-                <Table.Cell>
+                <Table.Cell onclick={() => selectProject(project.id)}>
+                  {formatDate(project.updatedAt)}
+                </Table.Cell>
+                <Table.Cell onclick={(e) => e.stopPropagation()}>
                   <div class="flex justify-end gap-2">
                     {#if $currentProject?.id !== project.id}
-                      <Button variant="outline" size="sm" onclick={() => selectProject(project.id)}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onclick={() => selectProject(project.id)}
+                        class="gap-2"
+                      >
                         Select
                       </Button>
                     {/if}

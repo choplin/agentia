@@ -7,6 +7,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Checkbox } from "$lib/components/ui/checkbox";
   import { SimpleTooltip } from "$lib/components/ui/tooltip";
+  import * as Select from "$lib/components/ui/select";
   import { Trash2, Download, Search, Filter, PlayCircle } from "lucide-svelte";
   import { sessions } from "$lib/stores/session";
   import { goto } from "$app/navigation";
@@ -97,22 +98,16 @@
   <div class="flex items-center justify-between">
     <h1 class="text-3xl font-bold">Sessions</h1>
     <div class="flex gap-2">
-      <SimpleTooltip content="Export sessions to CSV">
-        {#snippet children()}
-          <Button variant="outline" size="sm">
-            <Download class="mr-2 h-4 w-4" />
-            Export
-          </Button>
-        {/snippet}
-      </SimpleTooltip>
-      <SimpleTooltip content="Delete selected sessions">
-        {#snippet children()}
-          <Button variant="outline" size="sm" disabled={selectedSessions.size === 0}>
-            <Trash2 class="mr-2 h-4 w-4" />
-            Delete ({selectedSessions.size})
-          </Button>
-        {/snippet}
-      </SimpleTooltip>
+      <Button variant="outline" size="default" class="gap-2">
+        <Download class="h-4 w-4" />
+        Export
+      </Button>
+      {#if selectedSessions.size > 0}
+        <Button variant="outline" size="default" class="gap-2">
+          <Trash2 class="h-4 w-4" />
+          Delete ({selectedSessions.size})
+        </Button>
+      {/if}
     </div>
   </div>
 
@@ -131,14 +126,26 @@
             bind:value={searchQuery}
           />
         </div>
-        <select
-          class="h-10 rounded-md border border-input bg-background px-3 text-sm hover:border-primary/50 hover:shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20 transition-all cursor-pointer"
-          bind:value={filterStatus}
+        <Select.Root
+          type="single"
+          value={filterStatus}
+          onValueChange={(value) => (filterStatus = value || "all")}
         >
-          <option value="all">All</option>
-          <option value="running">Running</option>
-          <option value="stopped">Stopped</option>
-        </select>
+          <Select.Trigger class="w-40">
+            <span class="text-sm">
+              {filterStatus === "all"
+                ? "All Sessions"
+                : filterStatus === "running"
+                  ? "Running"
+                  : "Stopped"}
+            </span>
+          </Select.Trigger>
+          <Select.Content>
+            <Select.Item value="all">All Sessions</Select.Item>
+            <Select.Item value="running">Running</Select.Item>
+            <Select.Item value="stopped">Stopped</Select.Item>
+          </Select.Content>
+        </Select.Root>
         <SimpleTooltip content="More filters">
           {#snippet children()}
             <Button variant="outline" size="icon">
@@ -182,11 +189,13 @@
           <Table.Header>
             <Table.Row>
               <Table.Head class="w-12">
-                <Checkbox
-                  checked={selectedSessions.size === filteredSessions().length &&
-                    filteredSessions().length > 0}
-                  onCheckedChange={toggleSelectAll}
-                />
+                <div class="flex items-center justify-center">
+                  <Checkbox
+                    checked={selectedSessions.size === filteredSessions().length &&
+                      filteredSessions().length > 0}
+                    onCheckedChange={toggleSelectAll}
+                  />
+                </div>
               </Table.Head>
               <Table.Head>Session Title</Table.Head>
               <Table.Head>Status</Table.Head>
@@ -199,50 +208,56 @@
           </Table.Header>
           <Table.Body>
             {#each filteredSessions() as session}
-              <Table.Row onclick={() => viewSession(session.id)}>
-                <Table.Cell onclick={(e) => e.stopPropagation()}>
-                  <Checkbox
-                    checked={selectedSessions.has(session.id)}
-                    onCheckedChange={() => toggleSelection(session.id)}
-                  />
+              <Table.Row class="cursor-pointer">
+                <Table.Cell onclick={(e) => e.stopPropagation()} class="w-12">
+                  <div class="flex items-center justify-center">
+                    <Checkbox
+                      checked={selectedSessions.has(session.id)}
+                      onCheckedChange={() => toggleSelection(session.id)}
+                    />
+                  </div>
                 </Table.Cell>
-                <Table.Cell class="font-medium">{session.title}</Table.Cell>
-                <Table.Cell>
-                  <SimpleTooltip content={`Status: ${session.status}`}>
-                    {#snippet children()}
-                      <Badge
-                        variant={session.status === "active"
-                          ? "default"
-                          : session.status === "failed"
-                            ? "destructive"
-                            : "secondary"}
-                      >
-                        {session.status.charAt(0).toUpperCase() + session.status.slice(1)}
-                      </Badge>
-                    {/snippet}
-                  </SimpleTooltip>
+                <Table.Cell class="font-medium" onclick={() => viewSession(session.id)}>
+                  {session.title}
                 </Table.Cell>
-                <Table.Cell>{session.config.model.split("-").slice(0, 3).join("-")}</Table.Cell>
-                <Table.Cell>{formatDate(session.createdAt)}</Table.Cell>
-                <Table.Cell>{calculateDuration(session.createdAt, session.updatedAt)}</Table.Cell>
-                <Table.Cell>{session.messages.length}</Table.Cell>
+                <Table.Cell onclick={() => viewSession(session.id)}>
+                  <Badge
+                    variant={session.status === "active"
+                      ? "default"
+                      : session.status === "failed"
+                        ? "destructive"
+                        : "secondary"}
+                  >
+                    {session.status.charAt(0).toUpperCase() + session.status.slice(1)}
+                  </Badge>
+                </Table.Cell>
+                <Table.Cell onclick={() => viewSession(session.id)}>
+                  {session.config.model.split("-").slice(0, 3).join("-")}
+                </Table.Cell>
+                <Table.Cell onclick={() => viewSession(session.id)}>
+                  {formatDate(session.createdAt)}
+                </Table.Cell>
+                <Table.Cell onclick={() => viewSession(session.id)}>
+                  {calculateDuration(session.createdAt, session.updatedAt)}
+                </Table.Cell>
+                <Table.Cell onclick={() => viewSession(session.id)}>
+                  {session.messages.length}
+                </Table.Cell>
                 <Table.Cell class="text-right" onclick={(e) => e.stopPropagation()}>
                   {#if session.status === "active"}
-                    <SimpleTooltip content="Continue session">
-                      {#snippet children()}
-                        <Button variant="outline" size="sm" onclick={() => viewSession(session.id)}>
-                          <PlayCircle class="h-4 w-4" />
-                        </Button>
-                      {/snippet}
-                    </SimpleTooltip>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onclick={() => viewSession(session.id)}
+                      class="gap-2"
+                    >
+                      <PlayCircle class="h-4 w-4" />
+                      Continue
+                    </Button>
                   {:else}
-                    <SimpleTooltip content="View session details">
-                      {#snippet children()}
-                        <Button variant="ghost" size="sm" onclick={() => viewSession(session.id)}>
-                          View
-                        </Button>
-                      {/snippet}
-                    </SimpleTooltip>
+                    <Button variant="ghost" size="sm" onclick={() => viewSession(session.id)}>
+                      View Details
+                    </Button>
                   {/if}
                 </Table.Cell>
               </Table.Row>

@@ -186,14 +186,14 @@
           <Button
             variant="ghost"
             size="sm"
-            class="mb-2 h-auto w-full justify-start p-2"
+            class="mb-3 h-auto w-full justify-start p-3"
             onclick={() => navigateTo(`/session/${session.id}`)}
           >
-            <div class="flex w-full items-start gap-2">
-              <PlayCircle class="mt-0.5 h-4 w-4 text-green-500" />
-              <div class="flex-1 text-left">
-                <div class="font-medium">{session.title}</div>
-                <div class="text-xs text-muted-foreground">
+            <div class="flex w-full items-start gap-3">
+              <PlayCircle class="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
+              <div class="flex-1 overflow-hidden text-left">
+                <div class="truncate font-medium">{session.title}</div>
+                <div class="truncate text-xs text-muted-foreground">
                   {project?.name || "Unknown Project"}
                 </div>
               </div>
@@ -212,20 +212,20 @@
           <Button
             variant="ghost"
             size="sm"
-            class="mb-2 h-auto w-full justify-start p-2"
+            class="mb-3 h-auto w-full justify-start p-3"
             onclick={() => navigateTo(`/session/${session.id}`)}
           >
-            <div class="flex w-full items-start gap-2">
+            <div class="flex w-full items-start gap-3">
               {#if session.status === "completed"}
-                <CheckCircle class="mt-0.5 h-4 w-4 text-muted-foreground" />
+                <CheckCircle class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
               {:else if session.status === "failed"}
-                <XCircle class="mt-0.5 h-4 w-4 text-red-500" />
+                <XCircle class="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
               {:else}
-                <PauseCircle class="mt-0.5 h-4 w-4 text-yellow-500" />
+                <PauseCircle class="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
               {/if}
-              <div class="flex-1 text-left">
-                <div>{session.title}</div>
-                <div class="text-xs text-muted-foreground">
+              <div class="flex-1 overflow-hidden text-left">
+                <div class="truncate">{session.title}</div>
+                <div class="truncate text-xs text-muted-foreground">
                   {session.projectName}
                 </div>
               </div>
