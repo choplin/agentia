@@ -20,6 +20,7 @@ pre-commit:
     - name: rustfmt
       glob: "*.rs"
       run: rustfmt --edition 2021 {staged_files}
+      stage_fixed: true
 
     # Rust linting
     - name: clippy

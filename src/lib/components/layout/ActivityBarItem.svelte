@@ -1,5 +1,8 @@
 <script lang="ts">
   import { cn } from "$lib/utils";
+  import { Button } from "$lib/components/ui/button";
+  import { Separator } from "$lib/components/ui/separator";
+  import { SimpleTooltip } from "$lib/components/ui/tooltip";
 
   interface Props {
     icon?: any;
@@ -21,22 +24,23 @@
 </script>
 
 {#if separator}
-  <div class="my-2 h-px w-full bg-border"></div>
+  <Separator class="my-2 w-8" />
+{:else if label}
+  <SimpleTooltip content={label} delayDuration={300} side="right">
+    {#snippet children()}
+      <Button {onclick} variant={active ? "secondary" : "ghost"} size="icon" class={className}>
+        {#if icon}
+          {@const Icon = icon}
+          <Icon class="h-5 w-5" />
+        {/if}
+      </Button>
+    {/snippet}
+  </SimpleTooltip>
 {:else}
-  <button
-    {onclick}
-    title={label}
-    class={cn(
-      "flex h-10 w-10 items-center justify-center rounded transition-colors",
-      "hover:bg-muted hover:text-foreground",
-      "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-      active && "bg-muted text-foreground",
-      className,
-    )}
-  >
+  <Button {onclick} variant={active ? "secondary" : "ghost"} size="icon" class={className}>
     {#if icon}
       {@const Icon = icon}
       <Icon class="h-5 w-5" />
     {/if}
-  </button>
+  </Button>
 {/if}

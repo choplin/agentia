@@ -2,6 +2,11 @@
   import { onMount } from "svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import * as Table from "$lib/components/ui/table";
+  import { Input } from "$lib/components/ui/input";
+  import { Badge } from "$lib/components/ui/badge";
+  import { Checkbox } from "$lib/components/ui/checkbox";
+  import { SimpleTooltip } from "$lib/components/ui/tooltip";
   import { Trash2, Download, Search, Filter, PlayCircle } from "lucide-svelte";
   import { sessions } from "$lib/stores/session";
   import { goto } from "$app/navigation";
@@ -92,14 +97,22 @@
   <div class="flex items-center justify-between">
     <h1 class="text-3xl font-bold">Sessions</h1>
     <div class="flex gap-2">
-      <Button variant="outline" size="sm">
-        <Download class="mr-2 h-4 w-4" />
-        Export
-      </Button>
-      <Button variant="outline" size="sm" disabled={selectedSessions.size === 0}>
-        <Trash2 class="mr-2 h-4 w-4" />
-        Delete ({selectedSessions.size})
-      </Button>
+      <SimpleTooltip content="Export sessions to CSV">
+        {#snippet children()}
+          <Button variant="outline" size="sm">
+            <Download class="mr-2 h-4 w-4" />
+            Export
+          </Button>
+        {/snippet}
+      </SimpleTooltip>
+      <SimpleTooltip content="Delete selected sessions">
+        {#snippet children()}
+          <Button variant="outline" size="sm" disabled={selectedSessions.size === 0}>
+            <Trash2 class="mr-2 h-4 w-4" />
+            Delete ({selectedSessions.size})
+          </Button>
+        {/snippet}
+      </SimpleTooltip>
     </div>
   </div>
 
@@ -108,25 +121,31 @@
     <Card.Content class="p-4">
       <div class="flex gap-4">
         <div class="relative flex-1">
-          <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
+          <Search
+            class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <Input
             type="text"
             placeholder="Search sessions..."
-            class="h-10 w-full rounded-md border border-input bg-background pl-10 pr-3 text-sm"
+            class="pl-10"
             bind:value={searchQuery}
           />
         </div>
         <select
-          class="h-10 rounded-md border border-input bg-background px-3 text-sm"
+          class="h-10 rounded-md border border-input bg-background px-3 text-sm hover:border-primary/50 hover:shadow-sm focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20 transition-all cursor-pointer"
           bind:value={filterStatus}
         >
           <option value="all">All</option>
           <option value="running">Running</option>
           <option value="stopped">Stopped</option>
         </select>
-        <Button variant="outline" size="icon">
-          <Filter class="h-4 w-4" />
-        </Button>
+        <SimpleTooltip content="More filters">
+          {#snippet children()}
+            <Button variant="outline" size="icon">
+              <Filter class="h-4 w-4" />
+            </Button>
+          {/snippet}
+        </SimpleTooltip>
       </div>
     </Card.Content>
   </Card.Root>
@@ -159,78 +178,77 @@
     <!-- Sessions Table -->
     <Card.Root>
       <Card.Content class="p-0">
-        <table class="w-full">
-          <thead class="border-b">
-            <tr>
-              <th class="p-4 text-left">
-                <input
-                  type="checkbox"
+        <Table.Root>
+          <Table.Header>
+            <Table.Row>
+              <Table.Head class="w-12">
+                <Checkbox
                   checked={selectedSessions.size === filteredSessions().length &&
                     filteredSessions().length > 0}
-                  onchange={toggleSelectAll}
+                  onCheckedChange={toggleSelectAll}
                 />
-              </th>
-              <th class="p-4 text-left text-sm font-medium">Session Title</th>
-              <th class="p-4 text-left text-sm font-medium">Status</th>
-              <th class="p-4 text-left text-sm font-medium">Model</th>
-              <th class="p-4 text-left text-sm font-medium">Created</th>
-              <th class="p-4 text-left text-sm font-medium">Duration</th>
-              <th class="p-4 text-left text-sm font-medium">Messages</th>
-              <th class="p-4 text-right text-sm font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
+              </Table.Head>
+              <Table.Head>Session Title</Table.Head>
+              <Table.Head>Status</Table.Head>
+              <Table.Head>Model</Table.Head>
+              <Table.Head>Created</Table.Head>
+              <Table.Head>Duration</Table.Head>
+              <Table.Head>Messages</Table.Head>
+              <Table.Head class="text-right">Actions</Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
             {#each filteredSessions() as session}
-              <tr
-                class="border-b hover:bg-muted/50 cursor-pointer"
-                onclick={() => viewSession(session.id)}
-              >
-                <td class="p-4" onclick={(e) => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
+              <Table.Row onclick={() => viewSession(session.id)}>
+                <Table.Cell onclick={(e) => e.stopPropagation()}>
+                  <Checkbox
                     checked={selectedSessions.has(session.id)}
-                    onchange={() => toggleSelection(session.id)}
+                    onCheckedChange={() => toggleSelection(session.id)}
                   />
-                </td>
-                <td class="p-4 font-medium">{session.title}</td>
-                <td class="p-4">
-                  <span
-                    class="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium"
-                    class:bg-green-100={session.status === "active"}
-                    class:text-green-700={session.status === "active"}
-                    class:bg-gray-100={session.status === "completed"}
-                    class:text-gray-700={session.status === "completed"}
-                    class:bg-red-100={session.status === "failed"}
-                    class:text-red-700={session.status === "failed"}
-                    class:bg-yellow-100={session.status === "paused"}
-                    class:text-yellow-700={session.status === "paused"}
-                  >
-                    {session.status.charAt(0).toUpperCase() + session.status.slice(1)}
-                  </span>
-                </td>
-                <td class="p-4 text-sm">{session.config.model.split("-").slice(0, 3).join("-")}</td>
-                <td class="p-4 text-sm">{formatDate(session.createdAt)}</td>
-                <td class="p-4 text-sm"
-                  >{calculateDuration(session.createdAt, session.updatedAt)}</td
-                >
-                <td class="p-4 text-sm">{session.messages.length}</td>
-                <td class="p-4" onclick={(e) => e.stopPropagation()}>
-                  <div class="flex justify-end gap-2">
-                    {#if session.status === "active"}
-                      <Button variant="outline" size="sm" onclick={() => viewSession(session.id)}>
-                        <PlayCircle class="h-4 w-4" />
-                      </Button>
-                    {:else}
-                      <Button variant="ghost" size="sm" onclick={() => viewSession(session.id)}>
-                        View
-                      </Button>
-                    {/if}
-                  </div>
-                </td>
-              </tr>
+                </Table.Cell>
+                <Table.Cell class="font-medium">{session.title}</Table.Cell>
+                <Table.Cell>
+                  <SimpleTooltip content={`Status: ${session.status}`}>
+                    {#snippet children()}
+                      <Badge
+                        variant={session.status === "active"
+                          ? "default"
+                          : session.status === "failed"
+                            ? "destructive"
+                            : "secondary"}
+                      >
+                        {session.status.charAt(0).toUpperCase() + session.status.slice(1)}
+                      </Badge>
+                    {/snippet}
+                  </SimpleTooltip>
+                </Table.Cell>
+                <Table.Cell>{session.config.model.split("-").slice(0, 3).join("-")}</Table.Cell>
+                <Table.Cell>{formatDate(session.createdAt)}</Table.Cell>
+                <Table.Cell>{calculateDuration(session.createdAt, session.updatedAt)}</Table.Cell>
+                <Table.Cell>{session.messages.length}</Table.Cell>
+                <Table.Cell class="text-right" onclick={(e) => e.stopPropagation()}>
+                  {#if session.status === "active"}
+                    <SimpleTooltip content="Continue session">
+                      {#snippet children()}
+                        <Button variant="outline" size="sm" onclick={() => viewSession(session.id)}>
+                          <PlayCircle class="h-4 w-4" />
+                        </Button>
+                      {/snippet}
+                    </SimpleTooltip>
+                  {:else}
+                    <SimpleTooltip content="View session details">
+                      {#snippet children()}
+                        <Button variant="ghost" size="sm" onclick={() => viewSession(session.id)}>
+                          View
+                        </Button>
+                      {/snippet}
+                    </SimpleTooltip>
+                  {/if}
+                </Table.Cell>
+              </Table.Row>
             {/each}
-          </tbody>
-        </table>
+          </Table.Body>
+        </Table.Root>
       </Card.Content>
     </Card.Root>
   {/if}

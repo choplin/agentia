@@ -2,6 +2,10 @@
   import { onMount } from "svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import * as Table from "$lib/components/ui/table";
+  import { Input } from "$lib/components/ui/input";
+  import { Badge } from "$lib/components/ui/badge";
+  import { SimpleTooltip } from "$lib/components/ui/tooltip";
   import { Plus, Trash2, FolderOpen, ExternalLink } from "lucide-svelte";
   import { projects, currentProject } from "$lib/stores/project";
   import { open } from "@tauri-apps/plugin-dialog";
@@ -115,67 +119,81 @@
     <!-- Projects Table -->
     <Card.Root>
       <Card.Content class="p-0">
-        <table class="w-full">
-          <thead class="border-b">
-            <tr>
-              <th class="p-4 text-left text-sm font-medium">Project Name</th>
-              <th class="p-4 text-left text-sm font-medium">Description</th>
-              <th class="p-4 text-left text-sm font-medium">Path</th>
-              <th class="p-4 text-left text-sm font-medium">Status</th>
-              <th class="p-4 text-left text-sm font-medium">Last Accessed</th>
-              <th class="p-4 text-right text-sm font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table.Root>
+          <Table.Header>
+            <Table.Row>
+              <Table.Head>Project Name</Table.Head>
+              <Table.Head>Description</Table.Head>
+              <Table.Head>Path</Table.Head>
+              <Table.Head>Status</Table.Head>
+              <Table.Head>Last Accessed</Table.Head>
+              <Table.Head class="text-right">Actions</Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
             {#each $projects as project}
-              <tr class="border-b hover:bg-muted/50">
-                <td class="p-4">
+              <Table.Row>
+                <Table.Cell>
                   <div class="flex items-center gap-2 font-medium">
                     <FolderOpen class="h-4 w-4" />
                     {project.name}
                   </div>
-                </td>
-                <td class="p-4 text-sm text-muted-foreground">
+                </Table.Cell>
+                <Table.Cell class="text-muted-foreground">
                   {project.settings ? JSON.parse(project.settings).description || "-" : "-"}
-                </td>
-                <td class="p-4 text-sm">
+                </Table.Cell>
+                <Table.Cell>
                   <code class="rounded bg-muted px-2 py-1 text-xs">{project.path}</code>
-                </td>
-                <td class="p-4">
-                  {#if $currentProject?.id === project.id}
-                    <span
-                      class="inline-flex items-center rounded-full bg-primary px-2 py-1 text-xs font-medium text-primary-foreground"
-                    >
-                      Active
-                    </span>
-                  {:else}
-                    <span
-                      class="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700"
-                    >
-                      Inactive
-                    </span>
-                  {/if}
-                </td>
-                <td class="p-4 text-sm">{formatDate(project.updatedAt)}</td>
-                <td class="p-4">
+                </Table.Cell>
+                <Table.Cell>
+                  <SimpleTooltip
+                    content={$currentProject?.id === project.id
+                      ? "Currently active project"
+                      : "Click 'Select' to activate"}
+                  >
+                    {#snippet children()}
+                      <Badge variant={$currentProject?.id === project.id ? "default" : "secondary"}>
+                        {$currentProject?.id === project.id ? "Active" : "Inactive"}
+                      </Badge>
+                    {/snippet}
+                  </SimpleTooltip>
+                </Table.Cell>
+                <Table.Cell>{formatDate(project.updatedAt)}</Table.Cell>
+                <Table.Cell>
                   <div class="flex justify-end gap-2">
                     {#if $currentProject?.id !== project.id}
                       <Button variant="outline" size="sm" onclick={() => selectProject(project.id)}>
                         Select
                       </Button>
                     {/if}
-                    <Button variant="ghost" size="icon" onclick={() => openInFinder(project.path)}>
-                      <ExternalLink class="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onclick={() => deleteProject(project.id)}>
-                      <Trash2 class="h-4 w-4" />
-                    </Button>
+                    <SimpleTooltip content="Open in file manager">
+                      {#snippet children()}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onclick={() => openInFinder(project.path)}
+                        >
+                          <ExternalLink class="h-4 w-4" />
+                        </Button>
+                      {/snippet}
+                    </SimpleTooltip>
+                    <SimpleTooltip content="Delete project">
+                      {#snippet children()}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onclick={() => deleteProject(project.id)}
+                        >
+                          <Trash2 class="h-4 w-4" />
+                        </Button>
+                      {/snippet}
+                    </SimpleTooltip>
                   </div>
-                </td>
-              </tr>
+                </Table.Cell>
+              </Table.Row>
             {/each}
-          </tbody>
-        </table>
+          </Table.Body>
+        </Table.Root>
       </Card.Content>
     </Card.Root>
   {/if}
@@ -190,22 +208,22 @@
         <Card.Content class="space-y-4">
           <div>
             <label for="project-name" class="text-sm font-medium">Project Name</label>
-            <input
+            <Input
               id="project-name"
               type="text"
               bind:value={newProjectName}
-              class="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              class="mt-1"
               placeholder="My Project"
             />
           </div>
           <div>
             <label for="project-path" class="text-sm font-medium">Project Path</label>
             <div class="mt-1 flex gap-2">
-              <input
+              <Input
                 id="project-path"
                 type="text"
                 bind:value={newProjectPath}
-                class="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+                class="flex-1"
                 placeholder="/path/to/project"
                 readonly
               />
