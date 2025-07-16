@@ -1,6 +1,7 @@
 <script lang="ts">
   import "../app.css";
   import { page } from "$app/stores";
+  import { onMount } from "svelte";
   import AppShell from "$lib/components/layout/AppShell.svelte";
   import ActivityBar from "$lib/components/layout/ActivityBar.svelte";
   import ActivityBarItem from "$lib/components/layout/ActivityBarItem.svelte";
@@ -18,33 +19,44 @@
     Settings,
     Plug,
     BarChart3,
-    Folder,
+    Plus,
+    PlayCircle,
+    PauseCircle,
+    CheckCircle,
+    XCircle,
   } from "lucide-svelte";
   import { goto } from "$app/navigation";
   import type { Snippet } from "svelte";
+  import { sessions, runningSessions } from "$lib/stores/session";
+  import { projects, projectsMap } from "$lib/stores/project";
 
   let { children }: { children?: Snippet } = $props();
 
   // State
   let sidebarCollapsed = $state(false);
 
-  // Mock data
-  const currentProject = {
-    name: "agentia",
-    path: "/Users/aki/workspace/agentia",
-  };
+  // Load data on mount
+  onMount(async () => {
+    try {
+      await Promise.all([sessions.load(), projects.load()]);
+    } catch (error) {
+      console.error("Failed to load initial data:", error);
+    }
+  });
 
-  const worktrees = [
-    { branch: "main", isDefault: true },
-    { branch: "feature/ui-redesign" },
-    { branch: "feature/payment" },
-  ];
-
-  const recentSessions = [
-    { name: "Payment API Implementation", time: "2 hours ago", worktree: "feature/payment" },
-    { name: "Bug Fix #123", time: "Yesterday", worktree: "fix/cart-bug" },
-    { name: "Refactoring Discussion", time: "3 days ago", worktree: "main" },
-  ];
+  // Computed values
+  const recentSessions = $derived(
+    $sessions
+      .filter((s) => s.status !== "active")
+      .slice(0, 5)
+      .map((s) => {
+        const project = $projectsMap.get(s.projectId);
+        return {
+          ...s,
+          projectName: project?.name || "Unknown Project",
+        };
+      }),
+  );
 
   // Menu items
   type MenuItem = {
@@ -69,12 +81,29 @@
   // Get current path to determine active menu item
   const currentPath = $derived($page.url.pathname);
 
-  // Breadcrumb items
-  const breadcrumbItems = $derived([
-    { label: "Project" },
-    { label: currentProject?.name || "No Selection" },
-    { label: getViewName(currentPath) },
-  ]);
+  // Breadcrumb items - context-aware
+  const breadcrumbItems = $derived(
+    (() => {
+      const basePath = currentPath.split("/")[1];
+
+      // For session detail pages, show actual context
+      if (currentPath.startsWith("/session/")) {
+        const sessionId = currentPath.split("/")[2];
+        const session = $sessions.find((s) => s.id === sessionId);
+        if (session) {
+          const project = $projectsMap.get(session.projectId);
+          return [
+            { label: project?.name || "Unknown Project" },
+            { label: "main" }, // TODO: get actual worktree when implemented
+            { label: session.title },
+          ];
+        }
+      }
+
+      // For other pages, just show the page name
+      return [{ label: getViewName(currentPath) }];
+    })(),
+  );
 
   function getViewName(path: string): string {
     const names: Record<string, string> = {
@@ -95,6 +124,36 @@
 
   function navigateTo(path: string) {
     goto(path);
+  }
+
+  function getSessionIcon(status: string) {
+    switch (status) {
+      case "active":
+        return PlayCircle;
+      case "completed":
+        return CheckCircle;
+      case "failed":
+        return XCircle;
+      case "paused":
+        return PauseCircle;
+      default:
+        return MessageSquare;
+    }
+  }
+
+  function getSessionIconColor(status: string) {
+    switch (status) {
+      case "active":
+        return "text-green-500";
+      case "completed":
+        return "text-muted-foreground";
+      case "failed":
+        return "text-red-500";
+      case "paused":
+        return "text-yellow-500";
+      default:
+        return "text-muted-foreground";
+    }
   }
 </script>
 
@@ -117,69 +176,82 @@
 
   <!-- Side Panel -->
   <SidePanel bind:collapsed={sidebarCollapsed}>
-    <!-- Current Project -->
-    <SidePanelSection title="Current Project">
-      <Card.Root class="border-muted shadow-none">
-        <Card.Content class="p-3">
-          <div class="flex items-center gap-2 font-semibold">
-            <Folder class="h-4 w-4" />
-            {currentProject?.name || "No Selection"}
-          </div>
-          <div class="text-xs text-muted-foreground">
-            {currentProject?.path || "Please select a project"}
-          </div>
-        </Card.Content>
-      </Card.Root>
-      <Button
-        variant="outline"
-        size="sm"
-        class="mt-2 w-full"
-        onclick={() => navigateTo("/projects")}
-      >
-        Change Project
-      </Button>
-    </SidePanelSection>
-
-    <!-- Worktrees -->
-    <SidePanelSection title="Worktrees">
-      {#each worktrees as worktree}
-        <Button variant="ghost" size="sm" class="w-full justify-start gap-2">
-          <GitBranch class="h-4 w-4" />
-          <span>
-            {worktree.branch}
-            {#if worktree.isDefault}
-              <span class="ml-1 text-xs text-primary">(default)</span>
-            {/if}
-          </span>
-        </Button>
-      {/each}
-      <Button
-        variant="outline"
-        size="sm"
-        class="mt-2 w-full"
-        onclick={() => navigateTo("/worktrees")}
-      >
-        Manage Worktrees
-      </Button>
+    <!-- Active Sessions -->
+    <SidePanelSection title="Active Sessions">
+      {#if $runningSessions.length === 0}
+        <div class="py-3 text-center text-sm text-muted-foreground">No active sessions</div>
+      {:else}
+        {#each $runningSessions as session}
+          {@const project = $projectsMap.get(session.projectId)}
+          <Button
+            variant="ghost"
+            size="sm"
+            class="mb-2 h-auto w-full justify-start p-2"
+            onclick={() => navigateTo(`/session/${session.id}`)}
+          >
+            <div class="flex w-full items-start gap-2">
+              <PlayCircle class="mt-0.5 h-4 w-4 text-green-500" />
+              <div class="flex-1 text-left">
+                <div class="font-medium">{session.title}</div>
+                <div class="text-xs text-muted-foreground">
+                  {project?.name || "Unknown Project"}
+                </div>
+              </div>
+            </div>
+          </Button>
+        {/each}
+      {/if}
     </SidePanelSection>
 
     <!-- Recent Sessions -->
     <SidePanelSection title="Recent Sessions" class="flex-1 overflow-y-auto">
-      {#each recentSessions as session}
-        <Button variant="ghost" size="sm" class="mb-2 h-auto w-full justify-start p-2">
-          <div class="text-left">
-            <div>{session.name}</div>
-            <div class="text-xs text-muted-foreground">
-              {session.worktree} • {session.time}
+      {#if recentSessions.length === 0}
+        <div class="py-3 text-center text-sm text-muted-foreground">No recent sessions</div>
+      {:else}
+        {#each recentSessions as session}
+          <Button
+            variant="ghost"
+            size="sm"
+            class="mb-2 h-auto w-full justify-start p-2"
+            onclick={() => navigateTo(`/session/${session.id}`)}
+          >
+            <div class="flex w-full items-start gap-2">
+              {#if session.status === "completed"}
+                <CheckCircle class="mt-0.5 h-4 w-4 text-muted-foreground" />
+              {:else if session.status === "failed"}
+                <XCircle class="mt-0.5 h-4 w-4 text-red-500" />
+              {:else}
+                <PauseCircle class="mt-0.5 h-4 w-4 text-yellow-500" />
+              {/if}
+              <div class="flex-1 text-left">
+                <div>{session.title}</div>
+                <div class="text-xs text-muted-foreground">
+                  {session.projectName}
+                </div>
+              </div>
             </div>
-          </div>
-        </Button>
-      {/each}
+          </Button>
+        {/each}
+      {/if}
     </SidePanelSection>
 
-    <!-- Favorites -->
-    <SidePanelSection title="Favorites">
-      <div class="py-4 text-center text-sm text-muted-foreground">No favorites</div>
+    <!-- Quick Actions -->
+    <SidePanelSection title="Quick Actions">
+      <Button
+        variant="outline"
+        size="sm"
+        class="mb-2 w-full gap-2"
+        onclick={() => navigateTo("/sessions?action=new")}
+      >
+        <Plus class="h-4 w-4" />
+        New Session
+      </Button>
+      <Button variant="ghost" size="sm" class="mb-2 w-full" onclick={() => navigateTo("/sessions")}>
+        Browse All Sessions
+      </Button>
+      <Button variant="ghost" size="sm" class="w-full" onclick={() => navigateTo("/projects")}>
+        Browse Projects
+      </Button>
     </SidePanelSection>
   </SidePanel>
 

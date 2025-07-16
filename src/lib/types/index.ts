@@ -21,6 +21,7 @@ export interface SessionConfig {
 
 export interface Session {
   id: string;
+  projectId: string;
   title: string;
   config: SessionConfig;
   messages: Message[];
