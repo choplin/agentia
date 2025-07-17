@@ -16,16 +16,18 @@
   }
 </script>
 
-<div
-  class={cn(
-    "relative flex flex-col border-r bg-background transition-all duration-300",
-    collapsed ? "w-0 overflow-hidden" : "w-[260px]",
-    className,
-  )}
->
-  {#if children}
-    {@render children()}
-  {/if}
+<div class="relative flex">
+  <div
+    class={cn(
+      "flex flex-col border-r bg-background transition-all duration-300",
+      collapsed ? "w-0 overflow-hidden" : "w-[260px]",
+      className,
+    )}
+  >
+    {#if children}
+      {@render children()}
+    {/if}
+  </div>
 
   <button
     onclick={toggleCollapsed}
