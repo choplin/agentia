@@ -23,18 +23,32 @@
 
   const eventManager = new SessionEventManager();
 
-  onMount(async () => {
+  async function loadSession(id: string) {
+    loading = true;
+    error = null;
+
     try {
+      // Unsubscribe from previous session
+      await eventManager.unsubscribeAll();
+
       // Load session data
-      session = await sessions.get(sessionId);
+      session = await sessions.get(id);
       currentSession.set(session);
 
       // Subscribe to real-time updates
-      await eventManager.subscribe(sessionId);
+      await eventManager.subscribe(id);
     } catch (err) {
       error = err instanceof Error ? err.message : "Failed to load session";
+      session = null;
     } finally {
       loading = false;
+    }
+  }
+
+  // Load session when component mounts or when sessionId changes
+  $effect(() => {
+    if (sessionId) {
+      loadSession(sessionId);
     }
   });
 
