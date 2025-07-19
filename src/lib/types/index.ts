@@ -1,11 +1,22 @@
 // Project types
 export interface Project {
-  id: string;
+  id: number;
   path: string;
   name: string;
   createdAt: string;
   updatedAt: string;
   settings?: string;
+}
+
+// Worktree types
+export interface Worktree {
+  id: number;
+  projectId: number;
+  path: string;
+  name: string;
+  isMain: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // Session types
@@ -31,6 +42,26 @@ export interface Session {
   createdAt: string;
   updatedAt: string;
   claudeSessionId?: string;
+}
+
+// Claude CLI Session types
+export interface ClaudeCliSession {
+  id: number;
+  sessionId: string;
+  claudeSessionId: string;
+  filePath: string;
+  config: string;
+  parentCliSessionId?: number;
+  processPid?: number;
+  exitCode?: number;
+  startedAt: string;
+  endedAt?: string;
+}
+
+export interface ActiveCliSession {
+  sessionId: string;
+  cliSessionId: number;
+  startedAt: string;
 }
 
 // Message types

@@ -31,5 +31,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "cli": {
+      "args": [
+        {
+          "name": "reset-db",
+          "description": "Reset the application database",
+          "takesValue": false
+        }
+      ]
+    }
   }
 }

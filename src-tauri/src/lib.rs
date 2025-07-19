@@ -16,7 +16,8 @@ use uuid::Uuid;
 pub struct AppState {
     active_processes: Mutex<HashMap<Uuid, ClaudeCliProcess>>,
     db: Mutex<Database>,
-    current_project_id: Mutex<Option<String>>,
+    current_project_id: Mutex<Option<i32>>,
+    current_worktree_id: Mutex<Option<i32>>,
 }
 
 impl AppState {
@@ -25,6 +26,7 @@ impl AppState {
             active_processes: Mutex::new(HashMap::new()),
             db: Mutex::new(db),
             current_project_id: Mutex::new(None),
+            current_worktree_id: Mutex::new(None),
         }
     }
 }
@@ -36,8 +38,9 @@ async fn create_session(
     title: String,
     config: SessionConfig,
 ) -> Result<Session, String> {
-    // Get current project ID
-    let project_id = state.current_project_id.lock().await.clone().ok_or("No project selected")?;
+    // Get current project and worktree IDs
+    let project_id = (*state.current_project_id.lock().await).ok_or("No project selected")?;
+    let worktree_id = (*state.current_worktree_id.lock().await).ok_or("No worktree selected")?;
 
     // Create session
     let session = Session::new(title.clone(), config.clone());
@@ -45,14 +48,17 @@ async fn create_session(
     // Serialize config to JSON
     let config_json = serde_json::to_string(&config).map_err(|e| e.to_string())?;
 
-    // Create session in DB - need to pass session ID
+    // Create session in DB
     let db = state.db.lock().await;
+    let db_session = db
+        .create_session(project_id, worktree_id, &title, Some(&config_json))
+        .map_err(|e| e.to_string())?;
 
-    // First, we need to manually insert with our UUID
-    // This is a temporary workaround until we update the DB layer
-    db.create_session(&project_id, None, &title, Some(&config_json)).map_err(|e| e.to_string())?;
+    // Return session with proper ID from DB
+    let session_with_db_id =
+        Session { id: Uuid::parse_str(&db_session.id).map_err(|e| e.to_string())?, ..session };
 
-    Ok(session)
+    Ok(session_with_db_id)
 }
 
 #[tauri::command]
@@ -68,7 +74,7 @@ async fn get_session(
         .ok_or("Session not found")?;
 
     // Deserialize config
-    let config = if let Some(config_json) = &db_session.config {
+    let config = if let Some(config_json) = &db_session.default_config {
         serde_json::from_str(config_json).unwrap_or_default()
     } else {
         SessionConfig::default()
@@ -100,14 +106,18 @@ async fn get_session(
         status: process_status,
         created_at: db_session.created_at,
         updated_at: db_session.updated_at,
-        claude_session_id: db_session.claude_session_id.clone(),
+        claude_session_id: None, // Now stored in claude_cli_sessions table
     };
 
-    // Load messages from Claude Code file
-    if let Some(file_path) = &db_session.claude_session_id {
-        if let Ok(entries) = claude_code::read_session_file(file_path) {
+    // Load messages from Claude Code file - get latest CLI session
+    let latest_cli_session =
+        db.get_latest_claude_cli_session(&session_id.to_string()).map_err(|e| e.to_string())?;
+
+    if let Some(cli_session) = latest_cli_session {
+        if let Ok(entries) = claude_code::read_session_file(&cli_session.file_path) {
             session.messages = convert_claude_entries_to_messages(entries);
         }
+        session.claude_session_id = Some(cli_session.claude_session_id);
     }
 
     Ok(session)
@@ -116,12 +126,12 @@ async fn get_session(
 #[tauri::command]
 async fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<Session>, String> {
     // Get current project ID and path
-    let project_id = state.current_project_id.lock().await.clone().ok_or("No project selected")?;
+    let project_id = (*state.current_project_id.lock().await).ok_or("No project selected")?;
 
     // Get project path
     let db = state.db.lock().await;
     let project =
-        db.get_project(&project_id).map_err(|e| e.to_string())?.ok_or("Project not found")?;
+        db.get_project(project_id).map_err(|e| e.to_string())?.ok_or("Project not found")?;
 
     let project_path = project.path;
 
@@ -129,13 +139,14 @@ async fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<Session>
     let claude_sessions = claude_code::list_existing_sessions(&project_path).unwrap_or_default();
 
     // Get DB sessions
-    let db_sessions = db.get_sessions_by_project(&project_id).map_err(|e| e.to_string())?;
+    let db_sessions = db.get_sessions_by_project(project_id).map_err(|e| e.to_string())?;
 
     // Create a map of claude_session_id to DB session
     let mut db_session_map = std::collections::HashMap::new();
     for db_session in db_sessions {
-        if let Some(claude_id) = &db_session.claude_session_id {
-            db_session_map.insert(claude_id.clone(), db_session);
+        // Get latest CLI session for this session
+        if let Ok(Some(cli_session)) = db.get_latest_claude_cli_session(&db_session.id) {
+            db_session_map.insert(cli_session.file_path, db_session);
         }
     }
 
@@ -168,7 +179,7 @@ async fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<Session>
         if let Some(db_session) = db_session_map.get(&file_path) {
             // Session exists in DB, use it
             if let Ok(session_uuid) = Uuid::parse_str(&db_session.id) {
-                let config = if let Some(config_json) = &db_session.config {
+                let config = if let Some(config_json) = &db_session.default_config {
                     serde_json::from_str(config_json).unwrap_or_default()
                 } else {
                     SessionConfig::default()
@@ -211,26 +222,30 @@ async fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<Session>
             let config_json = serde_json::to_string(&config).unwrap_or_default();
 
             // Create in DB
-            if let Ok(db_session) =
-                db.create_session(&project_id, Some(&file_path), &title, Some(&config_json))
-            {
-                if let Ok(session_uuid) = Uuid::parse_str(&db_session.id) {
-                    let status = process_statuses
-                        .get(&session_uuid)
-                        .cloned()
-                        .unwrap_or(SessionStatus::Exited);
+            // For now, use the main worktree (this should be improved later)
+            let worktrees = db.get_worktrees_by_project(project.id).unwrap_or_default();
+            if let Some(main_worktree) = worktrees.iter().find(|w| w.is_main) {
+                if let Ok(db_session) =
+                    db.create_session(project.id, main_worktree.id, &title, Some(&config_json))
+                {
+                    if let Ok(session_uuid) = Uuid::parse_str(&db_session.id) {
+                        let status = process_statuses
+                            .get(&session_uuid)
+                            .cloned()
+                            .unwrap_or(SessionStatus::Exited);
 
-                    let session = Session {
-                        id: session_uuid,
-                        title,
-                        config,
-                        messages: Vec::new(),
-                        status,
-                        created_at: claude_session.start_time.unwrap_or_else(chrono::Utc::now),
-                        updated_at: claude_session.start_time.unwrap_or_else(chrono::Utc::now),
-                        claude_session_id: Some(file_path),
-                    };
-                    result.push(session);
+                        let session = Session {
+                            id: session_uuid,
+                            title,
+                            config,
+                            messages: Vec::new(),
+                            status,
+                            created_at: claude_session.start_time.unwrap_or_else(chrono::Utc::now),
+                            updated_at: claude_session.start_time.unwrap_or_else(chrono::Utc::now),
+                            claude_session_id: Some(file_path),
+                        };
+                        result.push(session);
+                    }
                 }
             }
         }
@@ -238,6 +253,92 @@ async fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<Session>
 
     result.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     Ok(result)
+}
+
+/// Handle Claude process streaming messages
+async fn handle_claude_process_messages(
+    app_handle: tauri::AppHandle,
+    session_id: Uuid,
+    mut receiver: tokio::sync::mpsc::UnboundedReceiver<Message>,
+) {
+    let mut claude_id_saved = false;
+
+    while let Some(msg) = receiver.recv().await {
+        // Emit message to frontend
+        let _ = app_handle.emit(&format!("session-{session_id}-message"), &msg);
+
+        // Update status and save Claude session ID when we first get it
+        if !claude_id_saved {
+            if let Some(state) = app_handle.try_state::<AppState>() {
+                let processes = state.active_processes.lock().await;
+                if let Some(process) = processes.get(&session_id) {
+                    if let Some(claude_session_id) = process.get_claude_session_id() {
+                        println!("DEBUG: Creating Claude CLI session entry: {claude_session_id}");
+                        let db = state.db.lock().await;
+
+                        // Get session config for Claude CLI session
+                        let session_config =
+                            if let Ok(Some(session)) = db.get_session(&session_id.to_string()) {
+                                session.default_config.unwrap_or_default()
+                            } else {
+                                serde_json::to_string(&SessionConfig::default()).unwrap_or_default()
+                            };
+
+                        // Find parent CLI session if any
+                        let parent_cli_session_id = db
+                            .get_latest_claude_cli_session(&session_id.to_string())
+                            .ok()
+                            .flatten()
+                            .map(|s| s.id);
+
+                        // Create Claude CLI session entry
+                        if let Ok(cli_session) = db.create_claude_cli_session(
+                            &session_id.to_string(),
+                            &claude_session_id,
+                            &claude_session_id, // Using same as file path for now
+                            &session_config,
+                            parent_cli_session_id,
+                            process.get_pid(),
+                        ) {
+                            // Mark as active
+                            let _ = db
+                                .create_active_cli_session(&session_id.to_string(), cli_session.id);
+                            claude_id_saved = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Process has ended - clean up
+    println!("DEBUG: Claude process ended for session {session_id}");
+    cleanup_claude_process(app_handle, session_id).await;
+}
+
+/// Clean up Claude process when it ends
+async fn cleanup_claude_process(app_handle: tauri::AppHandle, session_id: Uuid) {
+    if let Some(state) = app_handle.try_state::<AppState>() {
+        let mut processes = state.active_processes.lock().await;
+        if let Some(mut process) = processes.remove(&session_id) {
+            // Check exit code
+            let _ = process.is_running(); // This updates the exit code
+            let exit_code = process.get_exit_code().unwrap_or(0);
+            println!("DEBUG: Process exited with code: {exit_code}");
+
+            // Update Claude CLI session exit status
+            let db = state.db.lock().await;
+
+            // Find the active CLI session and update its status
+            if let Ok(active_sessions) = db.get_active_cli_sessions(&session_id.to_string()) {
+                for active in active_sessions {
+                    let _ = db.update_claude_cli_exit_status(active.cli_session_id, exit_code);
+                    let _ = db
+                        .delete_active_cli_session(&session_id.to_string(), active.cli_session_id);
+                }
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -255,7 +356,7 @@ async fn send_message(
             .map_err(|e| e.to_string())?
             .ok_or("Session not found")?;
 
-        if let Some(config_json) = &db_session.config {
+        if let Some(config_json) = &db_session.default_config {
             serde_json::from_str(config_json).unwrap_or_default()
         } else {
             SessionConfig::default()
@@ -277,11 +378,9 @@ async fn send_message(
 
         process.send_message(message).map_err(|e| format!("Failed to send message: {e}"))?;
 
-        // Update Claude session ID in DB if available
-        if let Some(claude_session_id) = process.get_claude_session_id() {
-            let db = state.db.lock().await;
-            let _ = db.update_session_claude_id(&session_id.to_string(), &claude_session_id);
-        }
+        // Touch session to update timestamp
+        let db = state.db.lock().await;
+        let _ = db.touch_session(&session_id.to_string());
     } else {
         // No existing process - create new one
         println!("DEBUG: Creating new Claude process for session {session_id}");
@@ -289,7 +388,7 @@ async fn send_message(
         let working_dir = config.working_directory.clone();
 
         match ClaudeCliProcess::spawn(session_id.to_string(), working_dir) {
-            Ok((process, mut receiver)) => {
+            Ok((process, receiver)) => {
                 // Send the initial message
                 process
                     .send_message(message)
@@ -301,63 +400,7 @@ async fn send_message(
 
                 // Handle streaming responses
                 let app_handle = app.clone();
-                let session_id_copy = session_id;
-
-                tokio::spawn(async move {
-                    let mut claude_id_saved = false;
-
-                    while let Some(msg) = receiver.recv().await {
-                        // Emit message to frontend
-                        let _ =
-                            app_handle.emit(&format!("session-{session_id_copy}-message"), &msg);
-
-                        // Update status and save Claude session ID when we first get it
-                        if !claude_id_saved {
-                            if let Some(state) = app_handle.try_state::<AppState>() {
-                                let processes = state.active_processes.lock().await;
-                                if let Some(process) = processes.get(&session_id_copy) {
-                                    if let Some(claude_session_id) = process.get_claude_session_id()
-                                    {
-                                        println!("DEBUG: Saving initial Claude session ID: {claude_session_id}");
-                                        let db = state.db.lock().await;
-                                        let _ = db.update_session_claude_id(
-                                            &session_id_copy.to_string(),
-                                            &claude_session_id,
-                                        );
-                                        claude_id_saved = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Process has ended - clean up
-                    println!("DEBUG: Claude process ended for session {session_id_copy}");
-
-                    // Get state from app handle
-                    if let Some(state) = app_handle.try_state::<AppState>() {
-                        let mut processes = state.active_processes.lock().await;
-                        if let Some(mut process) = processes.remove(&session_id_copy) {
-                            // Save final Claude session ID (in case it changed)
-                            if let Some(claude_session_id) = process.get_claude_session_id() {
-                                println!(
-                                    "DEBUG: Saving final Claude session ID: {claude_session_id}"
-                                );
-                                let db = state.db.lock().await;
-                                let _ = db.update_session_claude_id(
-                                    &session_id_copy.to_string(),
-                                    &claude_session_id,
-                                );
-                            }
-
-                            // Check exit code
-                            let _ = process.is_running(); // This updates the exit code
-                            if let Some(exit_code) = process.get_exit_code() {
-                                println!("DEBUG: Process exited with code: {exit_code}");
-                            }
-                        }
-                    }
-                });
+                tokio::spawn(handle_claude_process_messages(app_handle, session_id, receiver));
             }
             Err(e) => {
                 return Err(format!("Failed to start Claude process: {e}"));
@@ -411,15 +454,29 @@ async fn select_project(
     state: tauri::State<'_, AppState>,
     project_id: String,
 ) -> Result<(), String> {
+    // Parse project ID string to i32
+    let project_id_int = project_id.parse::<i32>().map_err(|_| "Invalid project ID")?;
+
     // Validate project exists
-    let project = state.db.lock().await.get_project(&project_id).map_err(|e| e.to_string())?;
+    let project = state.db.lock().await.get_project(project_id_int).map_err(|e| e.to_string())?;
 
     if project.is_none() {
         return Err("Project not found".to_string());
     }
 
     // Update current project
-    *state.current_project_id.lock().await = Some(project_id);
+    *state.current_project_id.lock().await = Some(project_id_int);
+
+    // Also set the main worktree as current
+    let worktrees = state
+        .db
+        .lock()
+        .await
+        .get_worktrees_by_project(project_id_int)
+        .map_err(|e| e.to_string())?;
+    if let Some(main_worktree) = worktrees.iter().find(|w| w.is_main) {
+        *state.current_worktree_id.lock().await = Some(main_worktree.id);
+    }
 
     Ok(())
 }
@@ -433,9 +490,46 @@ async fn create_project(
     let project = state.db.lock().await.create_project(&path, &name).map_err(|e| e.to_string())?;
 
     // Set as current project
-    *state.current_project_id.lock().await = Some(project.id.clone());
+    *state.current_project_id.lock().await = Some(project.id);
+
+    // Create main worktree for the new project
+    let worktree = state
+        .db
+        .lock()
+        .await
+        .create_worktree(project.id, &path, "main", true)
+        .map_err(|e| e.to_string())?;
+    *state.current_worktree_id.lock().await = Some(worktree.id);
 
     Ok(project)
+}
+
+#[tauri::command]
+async fn reset_database(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+
+    // Get the app data directory
+    let app_dir =
+        app.path().app_data_dir().map_err(|e| format!("Failed to get app data dir: {e}"))?;
+
+    let db_path = app_dir.join("agentia.db");
+
+    if db_path.exists() {
+        // Shutdown all processes first
+        if let Some(state) = app.try_state::<AppState>() {
+            let mut processes = state.active_processes.lock().await;
+            for (_, process) in processes.drain() {
+                let _ = process.shutdown().await;
+            }
+        }
+
+        // Remove the database file
+        std::fs::remove_file(&db_path).map_err(|e| format!("Failed to delete database: {e}"))?;
+
+        Ok(format!("Database deleted successfully at: {db_path:?}"))
+    } else {
+        Ok(format!("No database found at: {db_path:?}"))
+    }
 }
 
 /// Convert Claude Code entries to agentia messages
@@ -460,35 +554,45 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_cli::init())
         .setup(|app| {
+            use tauri::Manager;
+
+            // Check CLI arguments (only in debug builds)
+            #[cfg(debug_assertions)]
+            {
+                use tauri_plugin_cli::CliExt;
+
+                if let Ok(matches) = app.handle().cli().matches() {
+                    // Check if reset-db was explicitly passed (occurrences > 0)
+                    if let Some(reset_db_arg) = matches.args.get("reset-db") {
+                        if reset_db_arg.occurrences > 0 {
+                            println!("DEBUG: reset-db flag was explicitly passed");
+                            // Reset database
+                            let app_dir =
+                                app.path().app_data_dir().expect("Failed to get app data dir");
+                            let db_path = app_dir.join("agentia.db");
+
+                            if db_path.exists() {
+                                std::fs::remove_file(&db_path).expect("Failed to delete database");
+                                println!("Database deleted successfully at: {db_path:?}");
+                            } else {
+                                println!("No database found at: {db_path:?}");
+                            }
+
+                            // Exit after reset
+                            std::process::exit(0);
+                        }
+                    }
+                }
+            }
             // Initialize database
             let db = Database::new(app.handle()).expect("Failed to initialize database");
 
-            // Check for existing projects or create default
-            let current_dir = std::env::current_dir().expect("Failed to get current directory");
-            let current_path = current_dir.to_string_lossy();
-
-            let project = db.get_project_by_path(&current_path).expect("Failed to query projects");
-
-            let project_id = if let Some(project) = project {
-                project.id
-            } else {
-                // Create default project for current directory
-                let project = db
-                    .create_project(
-                        &current_path,
-                        current_dir
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("Default Project"),
-                    )
-                    .expect("Failed to create default project");
-                project.id
-            };
-
             // Create app state with DB
             let state = AppState::new(db);
-            *state.current_project_id.blocking_lock() = Some(project_id);
+            // Don't set any default project for GUI app
+            // Users should explicitly create or select projects
 
             app.manage(state);
 
@@ -504,6 +608,7 @@ pub fn run() {
             get_projects,
             select_project,
             create_project,
+            reset_database,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

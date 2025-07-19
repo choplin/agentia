@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
@@ -7,55 +8,53 @@ use super::models::Session;
 /// Create a new session
 pub fn create(
     conn: &Connection,
-    project_id: &str,
-    claude_session_id: Option<&str>,
+    project_id: i32,
+    worktree_id: i32,
     title: &str,
-    config: Option<&str>,
+    default_config: Option<&str>,
 ) -> Result<Session> {
-    let session = Session {
-        id: Uuid::new_v4().to_string(),
-        project_id: project_id.to_string(),
-        claude_session_id: claude_session_id.map(ToString::to_string),
-        title: title.to_string(),
-        config: config.map(ToString::to_string),
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    };
+    let now = Utc::now();
+    let id = Uuid::new_v4().to_string();
 
     conn.execute(
-        "INSERT INTO sessions (id, project_id, claude_session_id, title, config, created_at, updated_at)
+        "INSERT INTO sessions (id, project_id, worktree_id, title, default_config, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
-            session.id,
-            session.project_id,
-            session.claude_session_id,
-            session.title,
-            session.config,
-            session.created_at,
-            session.updated_at,
+            id,
+            project_id,
+            worktree_id,
+            title,
+            default_config,
+            now.to_rfc3339(),
+            now.to_rfc3339(),
         ],
     )?;
 
-    Ok(session)
+    Ok(Session {
+        id,
+        project_id,
+        worktree_id,
+        title: title.to_string(),
+        default_config: default_config.map(ToString::to_string),
+        created_at: now,
+        updated_at: now,
+    })
 }
 
-/// Update Claude session ID
-pub fn update_claude_session_id(
-    conn: &Connection,
-    session_id: &str,
-    claude_session_id: &str,
-) -> Result<()> {
+/// Update session's `updated_at` timestamp
+pub fn touch(conn: &Connection, session_id: &str) -> Result<()> {
+    let now = Utc::now();
     conn.execute(
-        "UPDATE sessions SET claude_session_id = ?1, updated_at = ?2 WHERE id = ?3",
-        params![claude_session_id, chrono::Utc::now(), session_id],
+        "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+        params![now.to_rfc3339(), session_id],
     )?;
     Ok(())
 }
 
 /// Find sessions by project
-pub fn find_by_project(conn: &Connection, project_id: &str) -> Result<Vec<Session>> {
+pub fn find_by_project(conn: &Connection, project_id: i32) -> Result<Vec<Session>> {
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, claude_session_id, title, config, created_at, updated_at
+        "SELECT id, project_id, worktree_id, title, default_config, created_at, updated_at
          FROM sessions WHERE project_id = ?1 ORDER BY updated_at DESC",
     )?;
 
@@ -64,11 +63,44 @@ pub fn find_by_project(conn: &Connection, project_id: &str) -> Result<Vec<Sessio
             Ok(Session {
                 id: row.get(0)?,
                 project_id: row.get(1)?,
-                claude_session_id: row.get(2)?,
+                worktree_id: row.get(2)?,
                 title: row.get(3)?,
-                config: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
+                default_config: row.get(4)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(6)?)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(sessions)
+}
+
+/// Find sessions by worktree
+#[allow(dead_code)]
+pub fn find_by_worktree(conn: &Connection, worktree_id: i32) -> Result<Vec<Session>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, worktree_id, title, default_config, created_at, updated_at
+         FROM sessions WHERE worktree_id = ?1 ORDER BY updated_at DESC",
+    )?;
+
+    let sessions = stmt
+        .query_map([worktree_id], |row| {
+            Ok(Session {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                worktree_id: row.get(2)?,
+                title: row.get(3)?,
+                default_config: row.get(4)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(6)?)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -79,7 +111,7 @@ pub fn find_by_project(conn: &Connection, project_id: &str) -> Result<Vec<Sessio
 /// Find session by ID
 pub fn find_by_id(conn: &Connection, session_id: &str) -> Result<Option<Session>> {
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, claude_session_id, title, config, created_at, updated_at FROM sessions WHERE id = ?1"
+        "SELECT id, project_id, worktree_id, title, default_config, created_at, updated_at FROM sessions WHERE id = ?1"
     )?;
 
     let session = stmt
@@ -87,11 +119,15 @@ pub fn find_by_id(conn: &Connection, session_id: &str) -> Result<Option<Session>
             Ok(Session {
                 id: row.get(0)?,
                 project_id: row.get(1)?,
-                claude_session_id: row.get(2)?,
+                worktree_id: row.get(2)?,
                 title: row.get(3)?,
-                config: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
+                default_config: row.get(4)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(6)?)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
             })
         })
         .optional()?;

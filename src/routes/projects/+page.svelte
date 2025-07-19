@@ -27,7 +27,7 @@
     }
   });
 
-  async function selectProject(id: string) {
+  async function selectProject(id: number) {
     try {
       await currentProject.select(id);
     } catch (err) {
@@ -35,7 +35,7 @@
     }
   }
 
-  function deleteProject(id: string) {
+  function deleteProject(id: number) {
     // TODO: Implement delete project functionality
     console.log("Delete project:", id);
   }

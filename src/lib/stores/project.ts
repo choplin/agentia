@@ -37,7 +37,7 @@ function createCurrentProjectStore() {
 
   return {
     subscribe,
-    async select(projectId: string) {
+    async select(projectId: number) {
       try {
         await selectProject(projectId);
         const projectsList = await getProjects();

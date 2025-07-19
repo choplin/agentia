@@ -10,7 +10,7 @@ export async function createProject(name: string, path: string): Promise<Project
   return invoke<Project>("create_project", { name, path });
 }
 
-export async function selectProject(projectId: string): Promise<void> {
+export async function selectProject(projectId: number): Promise<void> {
   return invoke("select_project", { projectId });
 }
 

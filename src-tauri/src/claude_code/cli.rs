@@ -715,6 +715,11 @@ impl ClaudeCliProcess {
         *self.exit_code.lock().ok()?
     }
 
+    /// Get the process ID
+    pub fn get_pid(&self) -> Option<i32> {
+        self.child.id().and_then(|id| i32::try_from(id).ok())
+    }
+
     /// Check if the process is still running
     pub fn is_running(&mut self) -> bool {
         match self.child.try_wait() {
