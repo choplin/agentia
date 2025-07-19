@@ -6,6 +6,7 @@ use std::path::Path;
 /// `/home/user/.claude/projects/-home-user-project/011ad736-7a96-4edf-bf3a-1ebcc0d91cdb.jsonl`
 ///
 /// This function extracts the UUID part (without .jsonl extension)
+#[allow(dead_code)]
 pub fn extract_session_uuid(file_path: &str) -> Option<String> {
     Path::new(file_path)
         .file_stem()

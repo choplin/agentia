@@ -16,11 +16,11 @@ export async function listenToSessionMessages(sessionId: string): Promise<Unlist
       if (session) {
         session.messages = [...session.messages, event.payload];
         // Update session status based on message
-        if (session.status === "completed" || session.status === "failed") {
+        if (session.status.type === "exited" || session.status.type === "failed") {
           // Don't update status if already finished
         } else if (event.payload.role === "assistant") {
           // Session is active if assistant is responding
-          session.status = "active";
+          session.status = { type: "running" };
         }
       }
       return sessionsList;

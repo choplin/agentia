@@ -32,6 +32,7 @@
   import { sessions, runningSessions } from "$lib/stores/session";
   import { projects, projectsMap } from "$lib/stores/project";
   import { theme } from "$lib/stores/theme";
+  import type { SessionStatus } from "$lib/types";
 
   let { children }: { children?: Snippet } = $props();
 
@@ -59,13 +60,11 @@
   // Computed values
   const recentSessions = $derived(
     $sessions
-      .filter((s) => s.status !== "active")
+      .filter((s) => s.status.type !== "running")
       .slice(0, 5)
       .map((s) => {
-        const project = $projectsMap.get(s.projectId);
         return {
           ...s,
-          projectName: project?.name || "Unknown Project",
         };
       }),
   );
@@ -103,12 +102,7 @@
         const sessionId = currentPath.split("/")[2];
         const session = $sessions.find((s) => s.id === sessionId);
         if (session) {
-          const project = $projectsMap.get(session.projectId);
-          return [
-            { label: project?.name || "Unknown Project" },
-            { label: "main" }, // TODO: get actual worktree when implemented
-            { label: session.title },
-          ];
+          return [{ label: session.title }];
         }
       }
 
@@ -138,31 +132,27 @@
     goto(path);
   }
 
-  function getSessionIcon(status: string) {
-    switch (status) {
-      case "active":
+  function getSessionIcon(status: SessionStatus) {
+    switch (status.type) {
+      case "running":
         return PlayCircle;
-      case "completed":
+      case "exited":
         return CheckCircle;
       case "failed":
         return XCircle;
-      case "paused":
-        return PauseCircle;
       default:
         return MessageSquare;
     }
   }
 
-  function getSessionIconColor(status: string) {
-    switch (status) {
-      case "active":
+  function getSessionIconColor(status: SessionStatus) {
+    switch (status.type) {
+      case "running":
         return "text-green-500";
-      case "completed":
+      case "exited":
         return "text-muted-foreground";
       case "failed":
         return "text-red-500";
-      case "paused":
-        return "text-yellow-500";
       default:
         return "text-muted-foreground";
     }
@@ -211,7 +201,6 @@
         <div class="py-3 text-center text-sm text-muted-foreground">No active sessions</div>
       {:else}
         {#each $runningSessions as session}
-          {@const project = $projectsMap.get(session.projectId)}
           <Button
             variant="ghost"
             size="sm"
@@ -222,9 +211,6 @@
               <PlayCircle class="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
               <div class="flex-1 overflow-hidden text-left">
                 <div class="truncate font-medium">{session.title}</div>
-                <div class="truncate text-xs text-muted-foreground">
-                  {project?.name || "Unknown Project"}
-                </div>
               </div>
             </div>
           </Button>
@@ -245,18 +231,15 @@
             onclick={() => navigateTo(`/session/${session.id}`)}
           >
             <div class="flex w-full items-start gap-3">
-              {#if session.status === "completed"}
+              {#if session.status.type === "exited"}
                 <CheckCircle class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-              {:else if session.status === "failed"}
+              {:else if session.status.type === "failed"}
                 <XCircle class="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
               {:else}
                 <PauseCircle class="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
               {/if}
               <div class="flex-1 overflow-hidden text-left">
                 <div class="truncate">{session.title}</div>
-                <div class="truncate text-xs text-muted-foreground">
-                  {session.projectName}
-                </div>
               </div>
             </div>
           </Button>

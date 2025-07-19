@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { page } from "$app/stores";
   import { Button } from "$lib/components/ui/button";
+  import { Input } from "$lib/components/ui/input";
   import * as Card from "$lib/components/ui/card";
   import { ArrowLeft, Download, Play, Pause, Send } from "lucide-svelte";
   import { goto } from "$app/navigation";
@@ -20,6 +21,12 @@
   let messageInput = $state("");
   let sending = $state(false);
   let messagesContainer = $state<HTMLDivElement>();
+
+  // Subscribe to sessions store to get updates
+  const sessionFromStore = $derived($sessions.find((s) => s.id === sessionId) || null);
+
+  // Use session from store if available
+  const displaySession = $derived(sessionFromStore || session);
 
   const eventManager = new SessionEventManager();
 
@@ -59,7 +66,7 @@
 
   // Auto-scroll to bottom when new messages arrive
   $effect(() => {
-    if (session && messagesContainer) {
+    if (displaySession && messagesContainer) {
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
   });
@@ -72,9 +79,17 @@
     sending = true;
 
     try {
+      // If session is paused, it will be automatically resumed when sending a message
       await sessions.sendMessage(sessionId, message);
+
+      // Update local session status if it was exited
+      if (displaySession && displaySession.status.type === "exited") {
+        // Status will be updated via store
+      }
     } catch (err) {
       error = err instanceof Error ? err.message : "Failed to send message";
+      // Restore the message on error
+      messageInput = message;
     } finally {
       sending = false;
     }
@@ -130,7 +145,7 @@
         <p class="text-sm text-destructive">{error}</p>
       </Card.Content>
     </Card.Root>
-  {:else if session}
+  {:else if displaySession}
     <!-- Header -->
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-4">
@@ -138,9 +153,12 @@
           <ArrowLeft class="h-4 w-4" />
         </Button>
         <div>
-          <h1 class="text-2xl font-bold">{session.title}</h1>
+          <h1 class="text-2xl font-bold">{displaySession.title}</h1>
           <p class="text-sm text-muted-foreground">
-            {session.config.model} • Created {new Date(session.createdAt).toLocaleString()}
+            ID: <span class="font-mono">{displaySession.id.slice(0, 8)}</span> •
+            {displaySession.config.model} • Created {new Date(
+              displaySession.createdAt,
+            ).toLocaleString()}
           </p>
         </div>
       </div>
@@ -149,7 +167,7 @@
           <Download class="mr-2 h-4 w-4" />
           Export
         </Button>
-        {#if session.status === "active"}
+        {#if displaySession.status.type === "running"}
           <Button variant="destructive" size="sm" onclick={stopSession}>
             <Pause class="mr-2 h-4 w-4" />
             Stop
@@ -162,11 +180,11 @@
     <Card.Root class="flex-1">
       <Card.Header>
         <Card.Title>Conversation History</Card.Title>
-        <Card.Description>{session.messages.length} messages</Card.Description>
+        <Card.Description>{displaySession.messages.length} messages</Card.Description>
       </Card.Header>
       <Card.Content>
         <div bind:this={messagesContainer} class="space-y-4 max-h-[60vh] overflow-y-auto">
-          {#each session.messages as message}
+          {#each displaySession.messages as message}
             <div class="rounded-lg p-4 {message.role === 'user' ? 'bg-muted' : 'bg-primary/10'}">
               <div class="mb-2 flex items-center justify-between">
                 <span class="text-sm font-medium">
@@ -189,28 +207,26 @@
         </div>
       </Card.Content>
 
-      {#if session.status === "active"}
-        <Card.Footer>
-          <form
-            onsubmit={(e) => {
-              e.preventDefault();
-              sendMessage();
-            }}
-            class="flex w-full gap-2"
-          >
-            <input
-              type="text"
-              bind:value={messageInput}
-              placeholder="Type a message..."
-              class="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
-              disabled={sending}
-            />
-            <Button type="submit" disabled={sending || !messageInput.trim()}>
-              <Send class="h-4 w-4" />
-            </Button>
-          </form>
-        </Card.Footer>
-      {/if}
+      <Card.Footer>
+        <form
+          onsubmit={(e) => {
+            e.preventDefault();
+            sendMessage();
+          }}
+          class="flex w-full gap-2"
+        >
+          <Input
+            type="text"
+            bind:value={messageInput}
+            placeholder="Type a message..."
+            class="flex-1"
+            disabled={sending}
+          />
+          <Button type="submit" disabled={sending || !messageInput.trim()}>
+            <Send class="h-4 w-4" />
+          </Button>
+        </form>
+      </Card.Footer>
     </Card.Root>
   {/if}
 </div>

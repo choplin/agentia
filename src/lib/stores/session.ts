@@ -67,7 +67,7 @@ function createSessionsStore() {
         update((sessions) => {
           const session = sessions.find((s) => s.id === sessionId);
           if (session) {
-            session.status = "completed";
+            session.status = { type: "exited" };
           }
           return sessions;
         });
@@ -95,7 +95,7 @@ export const currentSession = createCurrentSessionStore();
 
 // Derived store for running sessions
 export const runningSessions = derived(sessions, ($sessions) =>
-  $sessions.filter((s) => s.status === "active"),
+  $sessions.filter((s) => s.status.type === "running"),
 );
 
 // Derived store for quick session lookup

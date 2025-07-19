@@ -9,7 +9,10 @@ export interface Project {
 }
 
 // Session types
-export type SessionStatus = "active" | "paused" | "completed" | "failed";
+export type SessionStatus =
+  | { type: "running" }
+  | { type: "exited" }
+  | { type: "failed"; exitCode: number };
 
 export interface SessionConfig {
   model: string;
@@ -21,7 +24,6 @@ export interface SessionConfig {
 
 export interface Session {
   id: string;
-  projectId: string;
   title: string;
   config: SessionConfig;
   messages: Message[];

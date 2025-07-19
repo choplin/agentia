@@ -1,11 +1,12 @@
 use super::message::{Message, MessageContent, MessageRole, MessageType};
 use anyhow::Result;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 /// Claude CLI response types (both streaming and non-streaming)
@@ -201,6 +202,9 @@ pub struct ClaudeCommandBuilder {
 
     // IDE
     ide: bool,
+
+    // Session
+    session_id: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -309,6 +313,11 @@ impl ClaudeCommandBuilder {
         self
     }
 
+    pub fn session_id(mut self, id: impl Into<String>) -> Self {
+        self.session_id = Some(id.into());
+        self
+    }
+
     /// Build the command
     pub fn build(self) -> Command {
         let mut cmd = Command::new("claude");
@@ -397,6 +406,11 @@ impl ClaudeCommandBuilder {
             cmd.arg("--ide");
         }
 
+        // Session ID
+        if let Some(session_id) = self.session_id {
+            cmd.arg("--session-id").arg(session_id);
+        }
+
         // Prompt must be last
         if let Some(prompt) = self.prompt {
             cmd.arg(prompt);
@@ -409,11 +423,339 @@ impl ClaudeCommandBuilder {
     }
 }
 
+/// JSON input message format for streaming
+#[derive(Debug, Clone, Serialize)]
+pub struct StreamJsonInput {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub message: StreamJsonMessage,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StreamJsonMessage {
+    pub role: String,
+    pub content: Vec<StreamJsonContent>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
+pub enum StreamJsonContent {
+    Text { text: String },
+}
+
+/// Long-running Claude CLI process that accepts messages via stdin
+pub struct ClaudeCliProcess {
+    child: Child,
+    stdin_tx: mpsc::UnboundedSender<String>,
+    stdout_handle: JoinHandle<()>,
+    stderr_handle: JoinHandle<()>,
+    stdin_handle: JoinHandle<()>,
+    session_id: String,
+    claude_session_id: Arc<Mutex<Option<String>>>,
+    #[allow(dead_code)]
+    message_tx: mpsc::UnboundedSender<Message>,
+    exit_code: Arc<Mutex<Option<i32>>>,
+}
+
+impl ClaudeCliProcess {
+    /// Spawn a new long-running Claude CLI process
+    #[allow(clippy::too_many_lines)]
+    pub fn spawn(
+        session_id: String,
+        working_dir: Option<String>,
+    ) -> Result<(Self, mpsc::UnboundedReceiver<Message>)> {
+        let (message_tx, message_rx) = mpsc::unbounded_channel();
+        let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<String>();
+
+        // Build the command with streaming JSON format
+        let mut cmd = Command::new("claude");
+        cmd.arg("-p")
+            .arg("You are a helpful assistant")
+            .arg("--verbose")
+            .arg("--output-format=stream-json")
+            .arg("--input-format=stream-json");
+
+        if let Some(dir) = working_dir {
+            cmd.current_dir(dir);
+        }
+
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+
+        info!("Starting long-running Claude CLI process for session {}", session_id);
+        let mut child = cmd.spawn()?;
+
+        let stdin = child.stdin.take().expect("Failed to get stdin");
+        let stdout = child.stdout.take().expect("Failed to get stdout");
+        let stderr = child.stderr.take().expect("Failed to get stderr");
+
+        let claude_session_id = Arc::new(Mutex::new(None));
+        let exit_code = Arc::new(Mutex::new(None));
+
+        // Handle stdin writing
+        let stdin_handle = tokio::spawn(async move {
+            let mut stdin = stdin;
+            while let Some(json_str) = stdin_rx.recv().await {
+                debug!("Writing to Claude stdin: {}", json_str);
+                if let Err(e) = stdin.write_all(json_str.as_bytes()).await {
+                    error!("Failed to write to stdin: {}", e);
+                    break;
+                }
+                if let Err(e) = stdin.write_all(b"\n").await {
+                    error!("Failed to write newline: {}", e);
+                    break;
+                }
+                if let Err(e) = stdin.flush().await {
+                    error!("Failed to flush stdin: {}", e);
+                    break;
+                }
+            }
+            debug!("Stdin writer task ending");
+        });
+
+        // Handle stdout reading
+        let tx_stdout = message_tx.clone();
+        let session_id_clone = claude_session_id.clone();
+        let stdout_handle = tokio::spawn(async move {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+            let mut current_text = String::new();
+            let mut current_tool_name: Option<String> = None;
+            let mut current_tool_input = String::new();
+
+            while let Ok(Some(line)) = lines.next_line().await {
+                if line.trim().is_empty() {
+                    continue;
+                }
+
+                debug!("Claude stdout: {}", line);
+
+                match serde_json::from_str::<ClaudeResponse>(&line) {
+                    Ok(response) => match response {
+                        ClaudeResponse::System { subtype, session_id } => {
+                            info!("Claude system message: {}", subtype);
+                            if subtype == "init" {
+                                if let Some(sid) = session_id {
+                                    debug!("Received Claude session ID: {}", sid);
+                                    if let Ok(mut guard) = session_id_clone.lock() {
+                                        *guard = Some(sid);
+                                    }
+                                }
+                            }
+                        }
+                        ClaudeResponse::Assistant { message } => {
+                            for content in &message.content {
+                                match content {
+                                    AssistantContent::Text { text } => {
+                                        let msg =
+                                            Message::new_text(MessageRole::Assistant, text.clone());
+                                        let _ = tx_stdout.send(msg);
+                                    }
+                                    AssistantContent::ToolUse { name, input, .. } => {
+                                        let msg = Message {
+                                            id: uuid::Uuid::new_v4(),
+                                            role: MessageRole::Assistant,
+                                            message_type: MessageType::ToolUse,
+                                            content: MessageContent {
+                                                text: None,
+                                                tool_name: Some(name.clone()),
+                                                tool_input: Some(input.clone()),
+                                                tool_result: None,
+                                                error: None,
+                                            },
+                                            timestamp: chrono::Utc::now(),
+                                        };
+                                        let _ = tx_stdout.send(msg);
+                                    }
+                                }
+                            }
+                        }
+                        ClaudeResponse::ContentBlockStart { content_block, .. } => {
+                            match content_block {
+                                ContentBlock::Text { .. } => {
+                                    current_text.clear();
+                                }
+                                ContentBlock::ToolUse { name, .. } => {
+                                    current_tool_name = Some(name);
+                                    current_tool_input.clear();
+                                }
+                            }
+                        }
+                        ClaudeResponse::ContentBlockDelta { delta, .. } => match delta {
+                            ContentDelta::TextDelta { text } => {
+                                current_text.push_str(&text);
+                                let _ = tx_stdout.send(Message::new_text(
+                                    MessageRole::Assistant,
+                                    current_text.clone(),
+                                ));
+                            }
+                            ContentDelta::InputJsonDelta { partial_json } => {
+                                current_tool_input.push_str(&partial_json);
+                            }
+                        },
+                        ClaudeResponse::ContentBlockStop { .. } => {
+                            if let Some(tool_name) = current_tool_name.take() {
+                                if let Ok(input) = serde_json::from_str(&current_tool_input) {
+                                    let message = Message {
+                                        id: uuid::Uuid::new_v4(),
+                                        role: MessageRole::Assistant,
+                                        message_type: MessageType::ToolUse,
+                                        content: MessageContent {
+                                            text: None,
+                                            tool_name: Some(tool_name),
+                                            tool_input: Some(input),
+                                            tool_result: None,
+                                            error: None,
+                                        },
+                                        timestamp: chrono::Utc::now(),
+                                    };
+                                    let _ = tx_stdout.send(message);
+                                }
+                                current_tool_input.clear();
+                            }
+                        }
+                        ClaudeResponse::Error { error } => {
+                            let _ = tx_stdout.send(Message::new_error(error.message));
+                        }
+                        ClaudeResponse::User { message } => {
+                            for content in &message.content {
+                                match content {
+                                    UserContent::Text { text } => {
+                                        let msg =
+                                            Message::new_text(MessageRole::User, text.clone());
+                                        let _ = tx_stdout.send(msg);
+                                    }
+                                    UserContent::ToolResult { content, is_error, .. } => {
+                                        if *is_error {
+                                            let _ =
+                                                tx_stdout.send(Message::new_error(content.clone()));
+                                        } else {
+                                            let msg = Message::new_text(
+                                                MessageRole::User,
+                                                content.clone(),
+                                            );
+                                            let _ = tx_stdout.send(msg);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        ClaudeResponse::Result { subtype, result, is_error } => {
+                            if is_error {
+                                if let Some(error_msg) = result {
+                                    let _ = tx_stdout.send(Message::new_error(error_msg));
+                                }
+                            } else {
+                                debug!("Claude result: subtype={}, result={:?}", subtype, result);
+                            }
+                        }
+                        _ => {}
+                    },
+                    Err(e) => {
+                        warn!("Failed to parse Claude response: {} - Line: {}", e, line);
+                    }
+                }
+            }
+            debug!("Stdout reader task ending");
+        });
+
+        // Handle stderr reading
+        let tx_stderr = message_tx.clone();
+        let stderr_handle = tokio::spawn(async move {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if !line.trim().is_empty() {
+                    error!("Claude stderr: {}", line);
+                    let _ = tx_stderr.send(Message::new_error(format!("CLI Error: {line}")));
+                }
+            }
+            debug!("Stderr reader task ending");
+        });
+
+        let process = Self {
+            child,
+            stdin_tx,
+            stdout_handle,
+            stderr_handle,
+            stdin_handle,
+            session_id,
+            claude_session_id,
+            message_tx,
+            exit_code,
+        };
+
+        Ok((process, message_rx))
+    }
+
+    /// Send a message to the Claude process
+    pub fn send_message(&self, text: String) -> Result<()> {
+        let input = StreamJsonInput {
+            message_type: "user".to_string(),
+            message: StreamJsonMessage {
+                role: "user".to_string(),
+                content: vec![StreamJsonContent::Text { text }],
+            },
+        };
+
+        let json_str = serde_json::to_string(&input)?;
+        self.stdin_tx
+            .send(json_str)
+            .map_err(|e| anyhow::anyhow!("Failed to send to stdin: {}", e))?;
+        Ok(())
+    }
+
+    /// Get the Claude session ID if available
+    pub fn get_claude_session_id(&self) -> Option<String> {
+        self.claude_session_id.lock().ok()?.clone()
+    }
+
+    /// Get the exit code if process has exited
+    pub fn get_exit_code(&self) -> Option<i32> {
+        *self.exit_code.lock().ok()?
+    }
+
+    /// Check if the process is still running
+    pub fn is_running(&mut self) -> bool {
+        match self.child.try_wait() {
+            Ok(None) => true, // Still running
+            Ok(Some(status)) => {
+                // Process exited, store exit code
+                if let Ok(mut exit_code) = self.exit_code.lock() {
+                    *exit_code = status.code();
+                }
+                false
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Gracefully shutdown the process
+    pub async fn shutdown(mut self) -> Result<()> {
+        info!("Shutting down Claude CLI process for session {}", self.session_id);
+
+        // Kill the process if still running
+        if self.is_running() {
+            self.child.kill().await?;
+        }
+
+        // Close stdin to signal process to exit
+        drop(self.stdin_tx);
+
+        // Wait for all tasks to complete
+        let _ = tokio::join!(self.stdin_handle, self.stdout_handle, self.stderr_handle,);
+
+        Ok(())
+    }
+}
+
+#[allow(dead_code)]
 pub struct ClaudeCLI {
     // Holds the session ID returned from Claude CLI
     claude_session_id: Arc<Mutex<Option<String>>>,
 }
 
+#[allow(dead_code)]
 impl ClaudeCLI {
     pub fn new() -> Self {
         Self { claude_session_id: Arc::new(Mutex::new(None)) }
@@ -440,6 +782,8 @@ impl ClaudeCLI {
 
         let mut cmd = builder.build();
 
+        // Debug: print the full command
+        println!("DEBUG: Claude CLI command: {cmd:?}");
         info!("Starting Claude CLI process");
         let mut child = cmd.spawn()?;
 

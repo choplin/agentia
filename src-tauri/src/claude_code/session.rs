@@ -3,13 +3,18 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", tag = "type")]
 pub enum SessionStatus {
-    Active,
-    Paused,
-    Completed,
-    Failed,
+    /// Process is currently running
+    Running,
+    /// Process exited normally (exit code 0)
+    Exited,
+    /// Process exited with an error (non-zero exit code)
+    Failed {
+        #[serde(rename = "exitCode")]
+        exit_code: i32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,7 +61,7 @@ impl Session {
             title,
             config,
             messages: Vec::new(),
-            status: SessionStatus::Active,
+            status: SessionStatus::Exited,
             created_at: now,
             updated_at: now,
             claude_session_id: None,

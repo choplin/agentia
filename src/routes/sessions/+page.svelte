@@ -35,8 +35,9 @@
     // Filter by status
     if (filterStatus !== "all") {
       filtered = filtered.filter((s) => {
-        if (filterStatus === "running") return s.status === "active";
-        if (filterStatus === "stopped") return s.status === "completed" || s.status === "failed";
+        if (filterStatus === "running") return s.status.type === "running";
+        if (filterStatus === "stopped")
+          return s.status.type === "exited" || s.status.type === "failed";
         return true;
       });
     }
@@ -198,6 +199,7 @@
                 </div>
               </Table.Head>
               <Table.Head>Session Title</Table.Head>
+              <Table.Head>ID</Table.Head>
               <Table.Head>Status</Table.Head>
               <Table.Head>Model</Table.Head>
               <Table.Head>Created</Table.Head>
@@ -220,15 +222,20 @@
                 <Table.Cell class="font-medium" onclick={() => viewSession(session.id)}>
                   {session.title}
                 </Table.Cell>
+                <Table.Cell onclick={() => viewSession(session.id)} class="font-mono text-xs">
+                  {session.id.slice(0, 8)}
+                </Table.Cell>
                 <Table.Cell onclick={() => viewSession(session.id)}>
                   <Badge
-                    variant={session.status === "active"
+                    variant={session.status.type === "running"
                       ? "default"
-                      : session.status === "failed"
+                      : session.status.type === "failed"
                         ? "destructive"
                         : "secondary"}
                   >
-                    {session.status.charAt(0).toUpperCase() + session.status.slice(1)}
+                    {session.status.type === "failed"
+                      ? `Failed (${session.status.exitCode})`
+                      : session.status.type.charAt(0).toUpperCase() + session.status.type.slice(1)}
                   </Badge>
                 </Table.Cell>
                 <Table.Cell onclick={() => viewSession(session.id)}>
@@ -244,7 +251,7 @@
                   {session.messages.length}
                 </Table.Cell>
                 <Table.Cell class="text-right" onclick={(e) => e.stopPropagation()}>
-                  {#if session.status === "active"}
+                  {#if session.status.type === "running"}
                     <Button
                       variant="outline"
                       size="sm"

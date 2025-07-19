@@ -4,8 +4,7 @@ mod claude_code;
 mod db;
 
 use claude_code::{
-    extract_session_uuid, ClaudeCLI, ClaudeCommandBuilder, Message, MessageRole, OutputFormat,
-    Session, SessionConfig,
+    session::SessionStatus, ClaudeCliProcess, Message, MessageRole, Session, SessionConfig,
 };
 use db::Database;
 use std::collections::HashMap;
@@ -15,7 +14,7 @@ use uuid::Uuid;
 
 // Simplified application state
 pub struct AppState {
-    active_clis: Mutex<HashMap<Uuid, ClaudeCLI>>,
+    active_processes: Mutex<HashMap<Uuid, ClaudeCliProcess>>,
     db: Mutex<Database>,
     current_project_id: Mutex<Option<String>>,
 }
@@ -23,7 +22,7 @@ pub struct AppState {
 impl AppState {
     fn new(db: Database) -> Self {
         Self {
-            active_clis: Mutex::new(HashMap::new()),
+            active_processes: Mutex::new(HashMap::new()),
             db: Mutex::new(db),
             current_project_id: Mutex::new(None),
         }
@@ -75,12 +74,30 @@ async fn get_session(
         SessionConfig::default()
     };
 
+    // Check if process is running for this session
+    let process_status = {
+        let processes = state.active_processes.lock().await;
+        if let Some(process) = processes.get(&session_id) {
+            if let Some(exit_code) = process.get_exit_code() {
+                if exit_code == 0 {
+                    SessionStatus::Exited
+                } else {
+                    SessionStatus::Failed { exit_code }
+                }
+            } else {
+                SessionStatus::Running
+            }
+        } else {
+            SessionStatus::Exited
+        }
+    };
+
     let mut session = Session {
         id: session_id,
         title: db_session.title.clone(),
         config,
         messages: Vec::new(),
-        status: claude_code::session::SessionStatus::Completed,
+        status: process_status,
         created_at: db_session.created_at,
         updated_at: db_session.updated_at,
         claude_session_id: db_session.claude_session_id.clone(),
@@ -122,6 +139,25 @@ async fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<Session>
         }
     }
 
+    // Get running process statuses
+    let process_statuses = {
+        let processes = state.active_processes.lock().await;
+        let mut statuses = std::collections::HashMap::new();
+        for (session_id, process) in processes.iter() {
+            let status = if let Some(exit_code) = process.get_exit_code() {
+                if exit_code == 0 {
+                    SessionStatus::Exited
+                } else {
+                    SessionStatus::Failed { exit_code }
+                }
+            } else {
+                SessionStatus::Running
+            };
+            statuses.insert(*session_id, status);
+        }
+        statuses
+    };
+
     let mut result = Vec::new();
 
     // Process all Claude Code sessions
@@ -138,12 +174,15 @@ async fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<Session>
                     SessionConfig::default()
                 };
 
+                let status =
+                    process_statuses.get(&session_uuid).cloned().unwrap_or(SessionStatus::Exited);
+
                 let session = Session {
                     id: session_uuid,
                     title: db_session.title.clone(),
                     config,
                     messages: Vec::new(),
-                    status: claude_code::session::SessionStatus::Completed,
+                    status,
                     created_at: db_session.created_at,
                     updated_at: db_session.updated_at,
                     claude_session_id: Some(file_path.clone()),
@@ -176,12 +215,17 @@ async fn list_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<Session>
                 db.create_session(&project_id, Some(&file_path), &title, Some(&config_json))
             {
                 if let Ok(session_uuid) = Uuid::parse_str(&db_session.id) {
+                    let status = process_statuses
+                        .get(&session_uuid)
+                        .cloned()
+                        .unwrap_or(SessionStatus::Exited);
+
                     let session = Session {
                         id: session_uuid,
                         title,
                         config,
                         messages: Vec::new(),
-                        status: claude_code::session::SessionStatus::Completed,
+                        status,
                         created_at: claude_session.start_time.unwrap_or_else(chrono::Utc::now),
                         updated_at: claude_session.start_time.unwrap_or_else(chrono::Utc::now),
                         claude_session_id: Some(file_path),
@@ -203,21 +247,19 @@ async fn send_message(
     session_id: Uuid,
     message: String,
 ) -> Result<(), String> {
-    // Get session from DB to get config and claude_session_id
-    let (config, claude_session_id) = {
+    // Get session from DB to get config
+    let config = {
         let db = state.db.lock().await;
         let db_session = db
             .get_session(&session_id.to_string())
             .map_err(|e| e.to_string())?
             .ok_or("Session not found")?;
 
-        let config = if let Some(config_json) = &db_session.config {
+        if let Some(config_json) = &db_session.config {
             serde_json::from_str(config_json).unwrap_or_default()
         } else {
             SessionConfig::default()
-        };
-
-        (config, db_session.claude_session_id)
+        }
     };
 
     // Add user message
@@ -226,91 +268,134 @@ async fn send_message(
     // Emit user message
     app.emit(&format!("session-{session_id}-message"), &user_msg).map_err(|e| e.to_string())?;
 
-    // Remove existing CLI if any
-    {
-        let mut clis = state.active_clis.lock().await;
-        clis.remove(&session_id);
-    }
+    // Check if there's already a process for this session
+    let mut processes = state.active_processes.lock().await;
 
-    // Start Claude CLI
-    let mut cli = ClaudeCLI::new();
+    if let Some(process) = processes.get(&session_id) {
+        // Existing process - send message to it
+        println!("DEBUG: Using existing Claude process for session {session_id}");
 
-    // Load existing session ID if available
-    if let Some(claude_session_id) = &claude_session_id {
-        println!("Loading existing Claude session ID: {claude_session_id}");
-        cli.set_session_id(claude_session_id.clone());
+        process.send_message(message).map_err(|e| format!("Failed to send message: {e}"))?;
+
+        // Update Claude session ID in DB if available
+        if let Some(claude_session_id) = process.get_claude_session_id() {
+            let db = state.db.lock().await;
+            let _ = db.update_session_claude_id(&session_id.to_string(), &claude_session_id);
+        }
     } else {
-        println!("No existing Claude session ID for agentia session: {session_id}");
-    }
+        // No existing process - create new one
+        println!("DEBUG: Creating new Claude process for session {session_id}");
 
-    // Build command
-    let mut builder = ClaudeCommandBuilder::new()
-        .prompt(&message)
-        .print_mode()
-        .output_format(OutputFormat::StreamJson)
-        .permission_mode(&config.permission_mode)
-        .verbose();
+        let working_dir = config.working_directory.clone();
 
-    // Resume session if we have a Claude session ID
-    if let Some(claude_session_path) = cli.get_session_id() {
-        // Extract UUID from file path for --resume option
-        if let Some(uuid) = extract_session_uuid(&claude_session_path) {
-            println!("Resuming Claude session with UUID: {uuid}");
-            builder = builder.resume(uuid);
-        } else {
-            println!("Warning: Could not extract UUID from session path: {claude_session_path}");
-        }
-    }
+        match ClaudeCliProcess::spawn(session_id.to_string(), working_dir) {
+            Ok((process, mut receiver)) => {
+                // Send the initial message
+                process
+                    .send_message(message)
+                    .map_err(|e| format!("Failed to send initial message: {e}"))?;
 
-    // Set working directory
-    if let Some(dir) = config.working_directory {
-        builder = builder.working_dir(dir);
-    }
+                // Store the process
+                processes.insert(session_id, process);
+                drop(processes); // Release lock before spawning task
 
-    let mut receiver =
-        cli.send_message(builder).map_err(|e| format!("Failed to start Claude CLI: {e}"))?;
+                // Handle streaming responses
+                let app_handle = app.clone();
+                let session_id_copy = session_id;
 
-    // Store CLI instance
-    state.active_clis.lock().await.insert(session_id, cli);
+                tokio::spawn(async move {
+                    let mut claude_id_saved = false;
 
-    // Handle streaming responses
-    let app_handle = app.clone();
-    let session_id_copy = session_id;
+                    while let Some(msg) = receiver.recv().await {
+                        // Emit message to frontend
+                        let _ =
+                            app_handle.emit(&format!("session-{session_id_copy}-message"), &msg);
 
-    tokio::spawn(async move {
-        while let Some(msg) = receiver.recv().await {
-            // Emit message to frontend
-            let _ = app_handle.emit(&format!("session-{session_id_copy}-message"), &msg);
-        }
+                        // Update status and save Claude session ID when we first get it
+                        if !claude_id_saved {
+                            if let Some(state) = app_handle.try_state::<AppState>() {
+                                let processes = state.active_processes.lock().await;
+                                if let Some(process) = processes.get(&session_id_copy) {
+                                    if let Some(claude_session_id) = process.get_claude_session_id()
+                                    {
+                                        println!("DEBUG: Saving initial Claude session ID: {claude_session_id}");
+                                        let db = state.db.lock().await;
+                                        let _ = db.update_session_claude_id(
+                                            &session_id_copy.to_string(),
+                                            &claude_session_id,
+                                        );
+                                        claude_id_saved = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
 
-        // Clean up CLI when done
-        if let Some(state) = app_handle.try_state::<AppState>() {
-            let mut clis = state.active_clis.lock().await;
-            if let Some(cli) = clis.remove(&session_id_copy) {
-                // Get Claude session ID from CLI and save it
-                if let Some(claude_session_id) = cli.get_session_id() {
-                    println!(
-                        "Saving Claude session ID: {claude_session_id} for agentia session: {session_id_copy}"
-                    );
+                    // Process has ended - clean up
+                    println!("DEBUG: Claude process ended for session {session_id_copy}");
 
-                    // Update DB with Claude session ID
-                    let _ = state
-                        .db
-                        .lock()
-                        .await
-                        .update_session_claude_id(&session_id_copy.to_string(), &claude_session_id);
-                }
+                    // Get state from app handle
+                    if let Some(state) = app_handle.try_state::<AppState>() {
+                        let mut processes = state.active_processes.lock().await;
+                        if let Some(mut process) = processes.remove(&session_id_copy) {
+                            // Save final Claude session ID (in case it changed)
+                            if let Some(claude_session_id) = process.get_claude_session_id() {
+                                println!(
+                                    "DEBUG: Saving final Claude session ID: {claude_session_id}"
+                                );
+                                let db = state.db.lock().await;
+                                let _ = db.update_session_claude_id(
+                                    &session_id_copy.to_string(),
+                                    &claude_session_id,
+                                );
+                            }
+
+                            // Check exit code
+                            let _ = process.is_running(); // This updates the exit code
+                            if let Some(exit_code) = process.get_exit_code() {
+                                println!("DEBUG: Process exited with code: {exit_code}");
+                            }
+                        }
+                    }
+                });
+            }
+            Err(e) => {
+                return Err(format!("Failed to start Claude process: {e}"));
             }
         }
-    });
+    }
 
     Ok(())
 }
 
 #[tauri::command]
 async fn stop_session(state: tauri::State<'_, AppState>, session_id: Uuid) -> Result<(), String> {
-    let mut clis = state.active_clis.lock().await;
-    clis.remove(&session_id);
+    // Stop long-running process if exists
+    let mut processes = state.active_processes.lock().await;
+    if let Some(process) = processes.remove(&session_id) {
+        println!("DEBUG: Stopping Claude process for session {session_id}");
+        process.shutdown().await.map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn shutdown_all_processes(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    println!("DEBUG: Shutting down all Claude processes");
+
+    // Stop all long-running processes
+    let mut processes = state.active_processes.lock().await;
+    let process_list: Vec<_> = processes.drain().collect();
+    drop(processes);
+
+    for (session_id, process) in process_list {
+        println!("DEBUG: Shutting down process for session {session_id}");
+        if let Err(e) = process.shutdown().await {
+            eprintln!("Error shutting down process for session {session_id}: {e}");
+        }
+    }
+
     Ok(())
 }
 
@@ -415,6 +500,7 @@ pub fn run() {
             list_sessions,
             send_message,
             stop_session,
+            shutdown_all_processes,
             get_projects,
             select_project,
             create_project,
