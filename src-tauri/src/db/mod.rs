@@ -28,6 +28,16 @@ impl Database {
         Ok(db)
     }
 
+    #[cfg(test)]
+    pub fn new_with_path(path: &std::path::Path) -> Result<Self> {
+        let conn = Connection::open(path)?;
+
+        let mut db = Self { conn };
+        db.init_schema()?;
+
+        Ok(db)
+    }
+
     fn init_schema(&mut self) -> Result<()> {
         migrations::run_migrations(&self.conn)?;
         Ok(())
@@ -82,11 +92,24 @@ impl Database {
     pub fn create_session(
         &self,
         project_id: i32,
-        worktree_id: i32,
+        worktree_id: Option<i32>,
         title: &str,
         default_config: Option<&str>,
     ) -> Result<models::Session> {
-        session::create(&self.conn, project_id, worktree_id, title, default_config)
+        // If no worktree is specified, use the main worktree
+        let actual_worktree_id = if let Some(id) = worktree_id {
+            id
+        } else {
+            // Find main worktree for the project
+            let worktrees = self.get_worktrees_by_project(project_id)?;
+            worktrees
+                .into_iter()
+                .find(|w| w.is_main)
+                .map(|w| w.id)
+                .ok_or_else(|| anyhow::anyhow!("No main worktree found for project"))?
+        };
+
+        session::create(&self.conn, project_id, actual_worktree_id, title, default_config)
     }
 
     pub fn get_sessions_by_project(&self, project_id: i32) -> Result<Vec<models::Session>> {
@@ -96,6 +119,10 @@ impl Database {
     #[allow(dead_code)]
     pub fn get_sessions_by_worktree(&self, worktree_id: i32) -> Result<Vec<models::Session>> {
         session::find_by_worktree(&self.conn, worktree_id)
+    }
+
+    pub fn get_all_sessions(&self) -> Result<Vec<models::Session>> {
+        session::find_all(&self.conn)
     }
 
     pub fn get_session(&self, session_id: &str) -> Result<Option<models::Session>> {

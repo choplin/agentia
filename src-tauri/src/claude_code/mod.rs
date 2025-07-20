@@ -8,5 +8,4 @@ pub mod types;
 pub use cli::ClaudeCliProcess;
 pub use message::{Message, MessageContent, MessageRole, MessageType};
 pub use session::{Session, SessionConfig};
-pub use session_reader::{list_existing_sessions, read_session_file};
-pub use types::SessionLogEntry;
+pub use session_reader::{list_existing_sessions, read_session_file, ExistingSession};

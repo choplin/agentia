@@ -51,6 +51,34 @@ pub fn touch(conn: &Connection, session_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Find all sessions
+pub fn find_all(conn: &Connection) -> Result<Vec<Session>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, worktree_id, title, default_config, created_at, updated_at
+         FROM sessions ORDER BY updated_at DESC",
+    )?;
+
+    let sessions = stmt
+        .query_map([], |row| {
+            Ok(Session {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                worktree_id: row.get(2)?,
+                title: row.get(3)?,
+                default_config: row.get(4)?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
+                    .unwrap()
+                    .with_timezone(&Utc),
+                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(6)?)
+                    .unwrap()
+                    .with_timezone(&Utc),
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok(sessions)
+}
+
 /// Find sessions by project
 pub fn find_by_project(conn: &Connection, project_id: i32) -> Result<Vec<Session>> {
     let mut stmt = conn.prepare(
