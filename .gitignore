@@ -31,3 +31,7 @@ Cargo.lock
 
 # Lefthook
 .lefthook-local/
+
+# Test coverage
+coverage/
+*.lcov
