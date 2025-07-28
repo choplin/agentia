@@ -3,6 +3,7 @@
 mod claude_code;
 mod commands;
 mod db;
+mod error;
 mod services;
 
 use claude_code::ClaudeCliProcess;

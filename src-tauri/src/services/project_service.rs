@@ -1,4 +1,5 @@
 use crate::db::{models::Project, Database};
+use crate::error::AppError;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -11,16 +12,35 @@ impl ProjectService {
         Self { db }
     }
 
-    pub async fn get_projects(&self) -> Result<Vec<Project>, String> {
-        self.db.lock().await.get_projects().map_err(|e| e.to_string())
+    pub async fn get_projects(&self) -> Result<Vec<Project>, AppError> {
+        self.db.lock().await.get_projects().map_err(|e| AppError::Database(e.to_string()))
     }
 
-    pub async fn create_project(&self, path: &str, name: &str) -> Result<Project, String> {
+    pub async fn create_project(&self, path: &str, name: &str) -> Result<Project, AppError> {
+        // Validate input
+        if path.is_empty() || name.is_empty() {
+            return Err(AppError::InvalidInput(
+                "Project path and name cannot be empty".to_string(),
+            ));
+        }
+
         let db = self.db.lock().await;
-        let project = db.create_project(path, name).map_err(|e| e.to_string())?;
+
+        // Check if project already exists at this path
+        if let Ok(existing) = db.get_projects() {
+            if existing.iter().any(|p| p.path == path) {
+                return Err(AppError::AlreadyExists(format!(
+                    "Project already exists at path: {path}"
+                )));
+            }
+        }
+
+        let project =
+            db.create_project(path, name).map_err(|e| AppError::Database(e.to_string()))?;
 
         // Create main worktree for the new project
-        db.create_worktree(project.id, path, "main", true).map_err(|e| e.to_string())?;
+        db.create_worktree(project.id, path, "main", true)
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
         Ok(project)
     }
@@ -105,7 +125,49 @@ mod tests {
         // Try to create another project with the same path
         let result = service.create_project("/test/unique", "Duplicate Project").await;
 
-        // Should fail due to unique constraint
+        // Should fail with AlreadyExists error
         assert!(result.is_err());
+        match result.unwrap_err() {
+            crate::error::AppError::AlreadyExists(msg) => {
+                assert!(msg.contains("/test/unique"));
+            }
+            _ => panic!("Expected AlreadyExists error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_empty_name_validation() {
+        let (db, _temp_dir) = setup_test_db();
+        let service = ProjectService::new(Arc::clone(&db));
+
+        // Try to create project with empty name
+        let result = service.create_project("/test/path", "").await;
+
+        // Should fail with InvalidInput error
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            crate::error::AppError::InvalidInput(msg) => {
+                assert!(msg.contains("empty"));
+            }
+            _ => panic!("Expected InvalidInput error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_empty_path_validation() {
+        let (db, _temp_dir) = setup_test_db();
+        let service = ProjectService::new(Arc::clone(&db));
+
+        // Try to create project with empty path
+        let result = service.create_project("", "Test Project").await;
+
+        // Should fail with InvalidInput error
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            crate::error::AppError::InvalidInput(msg) => {
+                assert!(msg.contains("empty"));
+            }
+            _ => panic!("Expected InvalidInput error"),
+        }
     }
 }
