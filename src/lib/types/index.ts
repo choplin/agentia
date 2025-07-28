@@ -1,3 +1,6 @@
+// Re-export all types from separate files
+export * from "./errors";
+
 // Project types
 export interface Project {
   id: number;

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { getErrorDisplayMessage } from "$lib/types/errors";
 
   interface Props {
     isOpen: boolean;
@@ -54,7 +55,7 @@
       resetForm();
       onClose();
     } catch (err) {
-      error = err as string;
+      error = getErrorDisplayMessage(err);
     } finally {
       isCreating = false;
     }
