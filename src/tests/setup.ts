@@ -4,64 +4,42 @@
  */
 
 import { expect, vi, afterEach } from "vitest";
-import { TauriMock } from "./mocks/tauri";
+import { clearMocks } from "@tauri-apps/api/mocks";
+import "@testing-library/jest-dom";
 
 // Global configuration
 declare global {
   var __TEST_MODE__: boolean;
-  var __TAURI_INTERNALS__: {
-    invoke: (cmd: string, args?: any) => Promise<any>;
-    listen: (event: string, handler: (event: any) => void) => () => void;
-    emit: (event: string, payload: any) => void;
-  };
-  var __TAURI_MOCK__: TauriMock;
 }
 
 // Set test mode flag
 globalThis.__TEST_MODE__ = true;
 
-// Initialize global mocks
-const initializeGlobalMocks = () => {
-  // Initialize Tauri mock
-  const tauriMock = new TauriMock();
-  globalThis.__TAURI_MOCK__ = tauriMock;
+// Provide mock reset functionality between tests
+afterEach(() => {
+  // Clear Tauri mocks
+  clearMocks();
 
-  // Mock implementation of Tauri internals
-  // Provides the same interface as the actual Tauri API
-  globalThis.__TAURI_INTERNALS__ = {
-    invoke: (cmd: string, args?: any) => tauriMock.invoke(cmd, args),
-    listen: (event: string, handler: (event: any) => void) => tauriMock.listen(event, handler),
-    emit: (event: string, payload: any) => tauriMock.emit(event, payload),
-  };
+  // Clear all DOM modifications
+  document.body.innerHTML = "";
+  document.head.innerHTML = "";
 
-  // Provide mock reset functionality between tests
-  // Expected to be called in afterEach hook
-  afterEach(() => {
-    tauriMock.reset();
+  // Clear all timers
+  vi.clearAllTimers();
 
-    // Clear all DOM modifications
-    document.body.innerHTML = "";
-    document.head.innerHTML = "";
+  // Reset all mocks
+  vi.resetAllMocks();
 
-    // Clear all timers
-    vi.clearAllTimers();
-
-    // Reset all mocks
-    vi.resetAllMocks();
-
-    // Clear any custom properties added to window/global
-    if (typeof window !== "undefined") {
-      const win = window as any;
-      Object.keys(win).forEach((key) => {
-        if (key.startsWith("__test_") || key.startsWith("test_")) {
-          delete win[key];
-        }
-      });
-    }
-  });
-};
-
-initializeGlobalMocks();
+  // Clear any custom properties added to window/global
+  if (typeof window !== "undefined") {
+    const win = window as any;
+    Object.keys(win).forEach((key) => {
+      if (key.startsWith("__test_") || key.startsWith("test_")) {
+        delete win[key];
+      }
+    });
+  }
+});
 
 // Setup console method mocks
 const setupConsoleMocks = () => {
