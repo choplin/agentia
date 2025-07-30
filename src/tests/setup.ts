@@ -32,10 +32,12 @@ afterEach(() => {
 
   // Clear any custom properties added to window/global
   if (typeof window !== "undefined") {
-    const win = window as any;
-    Object.keys(win).forEach((key) => {
+    const windowKeys = Object.keys(window);
+    windowKeys.forEach((key) => {
       if (key.startsWith("__test_") || key.startsWith("test_")) {
-        delete win[key];
+        // Use bracket notation with a type assertion on the result
+        const windowObj = window as unknown as Record<string, unknown>;
+        delete windowObj[key];
       }
     });
   }

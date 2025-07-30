@@ -21,8 +21,8 @@ export function isAppError(error: unknown): error is AppError {
     error !== null &&
     "type" in error &&
     "message" in error &&
-    typeof (error as any).type === "string" &&
-    typeof (error as any).message === "string"
+    typeof (error as AppError).type === "string" &&
+    typeof (error as AppError).message === "string"
   );
 }
 

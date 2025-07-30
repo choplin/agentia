@@ -31,14 +31,14 @@
   import type { Snippet } from "svelte";
   import { sessions, runningSessions } from "$lib/stores/session";
   import { projects, projectsMap } from "$lib/stores/project";
-  import { theme } from "$lib/stores/theme";
+  import { theme, type Theme } from "$lib/stores/theme";
   import type { SessionStatus } from "$lib/types";
 
   let { children }: { children?: Snippet } = $props();
 
   // State
   let sidebarCollapsed = $state(false);
-  let currentTheme = $state<string>("system");
+  let currentTheme = $state<Theme>("system");
 
   // Load data on mount
   onMount(async () => {
@@ -159,10 +159,10 @@
   }
 
   function toggleTheme() {
-    const themes = ["light", "dark", "system"];
-    const currentIndex = themes.indexOf(currentTheme);
+    const themes: Theme[] = ["light", "dark", "system"];
+    const currentIndex = themes.indexOf(currentTheme as Theme);
     const nextIndex = (currentIndex + 1) % themes.length;
-    theme.set(themes[nextIndex] as any);
+    theme.set(themes[nextIndex]);
   }
 </script>
 
