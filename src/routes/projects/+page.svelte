@@ -7,29 +7,70 @@
   import { Badge } from "$lib/components/ui/badge";
   import { SimpleTooltip } from "$lib/components/ui/tooltip";
   import { Plus, Trash2, FolderOpen, ExternalLink } from "lucide-svelte";
-  import { projects, currentProject } from "$lib/stores/project";
   import { open } from "@tauri-apps/plugin-dialog";
   import { openPath } from "@tauri-apps/plugin-opener";
+  import { invoke } from "@tauri-apps/api/core";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import type { Project } from "$lib/types";
 
   let loading = $state(true);
   let error = $state<string | null>(null);
   let showNewProjectDialog = $state(false);
   let newProjectName = $state("");
   let newProjectPath = $state("");
+  let projects = $state<Project[]>([]);
+  let currentProject = $state<Project | null>(null);
 
-  onMount(async () => {
+  onMount(() => {
+    const unlisteners: UnlistenFn[] = [];
+
+    // Initial data load and event setup
+    (async () => {
+      await loadProjects();
+      await loadCurrentProject();
+
+      // Listen for project updates
+      unlisteners.push(
+        await listen("projects-changed", async () => {
+          await loadProjects();
+        }),
+      );
+
+      unlisteners.push(
+        await listen("current-project-changed", async () => {
+          await loadCurrentProject();
+        }),
+      );
+    })();
+
+    return () => {
+      unlisteners.forEach((unlisten) => unlisten());
+    };
+  });
+
+  async function loadProjects() {
     try {
-      await projects.load();
+      loading = true;
+      projects = await invoke<Project[]>("get_projects");
     } catch (err) {
       error = err instanceof Error ? err.message : "Failed to load projects";
     } finally {
       loading = false;
     }
-  });
+  }
+
+  async function loadCurrentProject() {
+    try {
+      currentProject = await invoke<Project | null>("get_current_project");
+    } catch (err) {
+      console.error("Failed to load current project:", err);
+    }
+  }
 
   async function selectProject(id: number) {
     try {
-      await currentProject.select(id);
+      await invoke("select_project", { projectId: id });
+      // Backend will emit 'current-project-changed' event
     } catch (err) {
       error = err instanceof Error ? err.message : "Failed to select project";
     }
@@ -70,10 +111,14 @@
     }
 
     try {
-      await projects.create(newProjectName, newProjectPath);
+      await invoke("create_project", {
+        name: newProjectName,
+        path: newProjectPath,
+      });
       showNewProjectDialog = false;
       newProjectName = "";
       newProjectPath = "";
+      // Backend will emit 'projects-changed' event
     } catch (err) {
       error = err instanceof Error ? err.message : "Failed to create project";
     }
@@ -109,7 +154,7 @@
         <p class="text-center text-muted-foreground">Loading projects...</p>
       </Card.Content>
     </Card.Root>
-  {:else if $projects.length === 0}
+  {:else if projects.length === 0}
     <Card.Root>
       <Card.Content class="pt-6">
         <p class="text-center text-muted-foreground">No projects yet. Create your first project!</p>
@@ -131,7 +176,7 @@
             </Table.Row>
           </Table.Header>
           <Table.Body>
-            {#each $projects as project}
+            {#each projects as project}
               <Table.Row class="cursor-pointer">
                 <Table.Cell onclick={() => selectProject(project.id)}>
                   <div class="flex items-center gap-2 font-medium">
@@ -146,8 +191,8 @@
                   <code class="rounded bg-muted px-2 py-1 text-xs">{project.path}</code>
                 </Table.Cell>
                 <Table.Cell onclick={() => selectProject(project.id)}>
-                  <Badge variant={$currentProject?.id === project.id ? "default" : "secondary"}>
-                    {$currentProject?.id === project.id ? "Active" : "Inactive"}
+                  <Badge variant={currentProject?.id === project.id ? "default" : "secondary"}>
+                    {currentProject?.id === project.id ? "Active" : "Inactive"}
                   </Badge>
                 </Table.Cell>
                 <Table.Cell onclick={() => selectProject(project.id)}>
@@ -155,7 +200,7 @@
                 </Table.Cell>
                 <Table.Cell onclick={(e) => e.stopPropagation()}>
                   <div class="flex justify-end gap-2">
-                    {#if $currentProject?.id !== project.id}
+                    {#if currentProject?.id !== project.id}
                       <Button
                         variant="outline"
                         size="sm"

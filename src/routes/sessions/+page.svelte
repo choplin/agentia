@@ -9,28 +9,50 @@
   import { SimpleTooltip } from "$lib/components/ui/tooltip";
   import * as Select from "$lib/components/ui/select";
   import { Trash2, Download, Search, Filter, PlayCircle } from "lucide-svelte";
-  import { sessions } from "$lib/stores/session";
   import { goto } from "$app/navigation";
+  import { invoke } from "@tauri-apps/api/core";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import type { Session } from "$lib/types";
 
   let loading = $state(true);
   let error = $state<string | null>(null);
   let selectedSessions = $state(new Set<string>());
   let filterStatus = $state("all");
   let searchQuery = $state("");
+  let sessions = $state<Session[]>([]);
 
-  onMount(async () => {
+  onMount(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    // Initial data load and event setup
+    (async () => {
+      await loadSessions();
+
+      // Listen for session updates
+      unlisten = await listen("session-state-changed", async () => {
+        await loadSessions();
+      });
+    })();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  });
+
+  async function loadSessions() {
     try {
-      await sessions.load();
+      loading = true;
+      sessions = await invoke<Session[]>("list_sessions");
     } catch (err) {
       error = err instanceof Error ? err.message : "Failed to load sessions";
     } finally {
       loading = false;
     }
-  });
+  }
 
   // Computed filtered sessions
   let filteredSessions = $derived(() => {
-    let filtered = $sessions;
+    let filtered = sessions;
 
     // Filter by status
     if (filterStatus !== "all") {

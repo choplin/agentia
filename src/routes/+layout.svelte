@@ -29,45 +29,96 @@
   } from "lucide-svelte";
   import { goto } from "$app/navigation";
   import type { Snippet } from "svelte";
-  import { sessions, runningSessions } from "$lib/stores/session";
-  import { projects, projectsMap } from "$lib/stores/project";
   import { theme, type Theme } from "$lib/stores/theme";
-  import type { SessionStatus } from "$lib/types";
+  import type { Session, Project, SessionStatus } from "$lib/types";
+  import { invoke } from "@tauri-apps/api/core";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
   let { children }: { children?: Snippet } = $props();
 
   // State
   let sidebarCollapsed = $state(false);
   let currentTheme = $state<Theme>("system");
+  let runningSessions = $state<Session[]>([]);
+  let projects = $state<Project[]>([]);
+  let currentProject = $state<Project | null>(null);
 
   // Load data on mount
-  onMount(async () => {
+  onMount(() => {
     // Initialize theme
     theme.init();
 
     // Subscribe to theme changes
-    theme.subscribe((value) => {
+    const unsubscribeTheme = theme.subscribe((value) => {
       currentTheme = value;
     });
 
-    try {
-      await Promise.all([sessions.load(), projects.load()]);
-    } catch (error) {
-      console.error("Failed to load initial data:", error);
-    }
+    // Set up event listeners
+    const unlisteners: UnlistenFn[] = [];
+
+    // Initial data load and event setup
+    (async () => {
+      // Load initial data
+      await loadRunningSessions();
+      await loadProjects();
+      await loadCurrentProject();
+
+      // Listen for session state changes
+      unlisteners.push(
+        await listen("session-state-changed", async () => {
+          await loadRunningSessions();
+        }),
+      );
+
+      // Listen for project changes
+      unlisteners.push(
+        await listen("projects-changed", async () => {
+          await loadProjects();
+        }),
+      );
+
+      unlisteners.push(
+        await listen("current-project-changed", async () => {
+          await loadCurrentProject();
+        }),
+      );
+    })();
+
+    // Cleanup
+    return () => {
+      unsubscribeTheme();
+      unlisteners.forEach((unlisten) => unlisten());
+    };
   });
 
-  // Computed values
-  const recentSessions = $derived(
-    $sessions
-      .filter((s) => s.status.type !== "running")
-      .slice(0, 5)
-      .map((s) => {
-        return {
-          ...s,
-        };
-      }),
-  );
+  async function loadRunningSessions() {
+    try {
+      runningSessions = await invoke<Session[]>("list_sessions", {
+        filter: { status: "running" },
+      });
+    } catch (error) {
+      console.error("Failed to load running sessions:", error);
+    }
+  }
+
+  async function loadProjects() {
+    try {
+      projects = await invoke<Project[]>("get_projects");
+    } catch (error) {
+      console.error("Failed to load projects:", error);
+    }
+  }
+
+  async function loadCurrentProject() {
+    try {
+      currentProject = await invoke<Project | null>("get_current_project");
+    } catch (error) {
+      console.error("Failed to load current project:", error);
+    }
+  }
+
+  // Recent sessions will be loaded separately when needed
+  let recentSessions = $state<Session[]>([]);
 
   // Menu items
   type MenuItem = {
@@ -100,10 +151,8 @@
       // For session detail pages, show actual context
       if (currentPath.startsWith("/session/")) {
         const sessionId = currentPath.split("/")[2];
-        const session = $sessions.find((s) => s.id === sessionId);
-        if (session) {
-          return [{ label: session.title }];
-        }
+        // Since we don't have sessions in memory, just show generic title
+        return [{ label: "Session Details" }];
       }
 
       // For other pages, just show the page name
@@ -197,10 +246,10 @@
   <SidePanel bind:collapsed={sidebarCollapsed}>
     <!-- Active Sessions -->
     <SidePanelSection title="Active Sessions">
-      {#if $runningSessions.length === 0}
+      {#if runningSessions.length === 0}
         <div class="py-3 text-center text-sm text-muted-foreground">No active sessions</div>
       {:else}
-        {#each $runningSessions as session}
+        {#each runningSessions as session}
           <Button
             variant="ghost"
             size="sm"

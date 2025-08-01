@@ -6,11 +6,11 @@
   import * as Card from "$lib/components/ui/card";
   import { ArrowLeft, Download, Play, Pause, Send } from "lucide-svelte";
   import { goto } from "$app/navigation";
-  import { sessions, currentSession } from "$lib/stores/session";
-  import { SessionEventManager } from "$lib/events/session";
   import MarkdownRenderer from "$lib/components/MarkdownRenderer.svelte";
   import ToolMessage from "$lib/components/ToolMessage.svelte";
   import type { Session, Message } from "$lib/types";
+  import { invoke } from "@tauri-apps/api/core";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
   // Get session ID from route params
   let sessionId = $derived($page.params.id);
@@ -21,14 +21,7 @@
   let messageInput = $state("");
   let sending = $state(false);
   let messagesContainer = $state<HTMLDivElement>();
-
-  // Subscribe to sessions store to get updates
-  const sessionFromStore = $derived($sessions.find((s) => s.id === sessionId) || null);
-
-  // Use session from store if available
-  const displaySession = $derived(sessionFromStore || session);
-
-  const eventManager = new SessionEventManager();
+  let messageListener: UnlistenFn | null = null;
 
   async function loadSession(id: string) {
     loading = true;
@@ -36,14 +29,26 @@
 
     try {
       // Unsubscribe from previous session
-      await eventManager.unsubscribeAll();
+      if (messageListener) {
+        messageListener();
+        messageListener = null;
+      }
 
       // Load session data
-      session = await sessions.get(id);
-      currentSession.set(session);
+      session = await invoke<Session>("get_session", { sessionId: id });
 
-      // Subscribe to real-time updates
-      await eventManager.subscribe(id);
+      // Subscribe to real-time message updates
+      messageListener = await listen<Message>(`session-${id}-message`, (event) => {
+        if (session) {
+          session.messages = [...session.messages, event.payload];
+          // Update session status based on message
+          if (session.status.type !== "exited" && session.status.type !== "failed") {
+            if (event.payload.role === "assistant") {
+              session.status = { type: "running" };
+            }
+          }
+        }
+      });
     } catch (err) {
       error = err instanceof Error ? err.message : "Failed to load session";
       session = null;
@@ -59,14 +64,15 @@
     }
   });
 
-  onDestroy(async () => {
-    await eventManager.unsubscribeAll();
-    currentSession.clear();
+  onDestroy(() => {
+    if (messageListener) {
+      messageListener();
+    }
   });
 
   // Auto-scroll to bottom when new messages arrive
   $effect(() => {
-    if (displaySession && messagesContainer) {
+    if (session && messagesContainer) {
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
   });
@@ -80,11 +86,11 @@
 
     try {
       // If session is paused, it will be automatically resumed when sending a message
-      await sessions.sendMessage(sessionId, message);
+      await invoke("send_message", { sessionId, message });
 
       // Update local session status if it was exited
-      if (displaySession && displaySession.status.type === "exited") {
-        // Status will be updated via store
+      if (session && session.status.type === "exited") {
+        // Status will be updated via event
       }
     } catch (err) {
       error = err instanceof Error ? err.message : "Failed to send message";
@@ -97,9 +103,9 @@
 
   async function stopSession() {
     try {
-      await sessions.stop(sessionId);
+      await invoke("stop_session", { sessionId });
       // Reload session to get updated status
-      session = await sessions.get(sessionId);
+      session = await invoke<Session>("get_session", { sessionId });
     } catch (err) {
       error = err instanceof Error ? err.message : "Failed to stop session";
     }
@@ -145,7 +151,7 @@
         <p class="text-sm text-destructive">{error}</p>
       </Card.Content>
     </Card.Root>
-  {:else if displaySession}
+  {:else if session}
     <!-- Header -->
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-4">
@@ -153,12 +159,10 @@
           <ArrowLeft class="h-4 w-4" />
         </Button>
         <div>
-          <h1 class="text-2xl font-bold">{displaySession.title}</h1>
+          <h1 class="text-2xl font-bold">{session.title}</h1>
           <p class="text-sm text-muted-foreground">
-            ID: <span class="font-mono">{displaySession.id.slice(0, 8)}</span> •
-            {displaySession.config.model} • Created {new Date(
-              displaySession.createdAt,
-            ).toLocaleString()}
+            ID: <span class="font-mono">{session.id.slice(0, 8)}</span> •
+            {session.config.model} • Created {new Date(session.createdAt).toLocaleString()}
           </p>
         </div>
       </div>
@@ -167,7 +171,7 @@
           <Download class="mr-2 h-4 w-4" />
           Export
         </Button>
-        {#if displaySession.status.type === "running"}
+        {#if session.status.type === "running"}
           <Button variant="destructive" size="sm" onclick={stopSession}>
             <Pause class="mr-2 h-4 w-4" />
             Stop
@@ -180,11 +184,11 @@
     <Card.Root class="flex-1">
       <Card.Header>
         <Card.Title>Conversation History</Card.Title>
-        <Card.Description>{displaySession.messages.length} messages</Card.Description>
+        <Card.Description>{session.messages.length} messages</Card.Description>
       </Card.Header>
       <Card.Content>
         <div bind:this={messagesContainer} class="space-y-4 max-h-[60vh] overflow-y-auto">
-          {#each displaySession.messages as message}
+          {#each session.messages as message}
             <div class="rounded-lg p-4 {message.role === 'user' ? 'bg-muted' : 'bg-primary/10'}">
               <div class="mb-2 flex items-center justify-between">
                 <span class="text-sm font-medium">
