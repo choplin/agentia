@@ -21,6 +21,14 @@
 
 ## Technical Guidelines
 
+### State Management Architecture
+
+- **Backend is Single Source of Truth** - Don't duplicate backend state in frontend stores
+- **Stores are for UI state only** - Theme, layout preferences, temporary form state
+- **Fetch data when needed** - Use `invoke()` to get data from backend
+- **Use events for updates** - Listen to backend events and re-fetch data
+- See `docs/state-management-architecture.md` for detailed guidelines
+
 ### Svelte 5 Runes Mode
 
 - Use `$state()` for reactive state
