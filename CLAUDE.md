@@ -102,6 +102,17 @@ Individual commands are also available:
 - Check for test commands in package.json before running tests
 - Don't assume specific test frameworks
 
+### Testing Guidelines
+
+- **Focus tests on business value** - Test actual functionality, not test infrastructure itself
+- **Don't test the tools** - Mocks, helpers, and test utilities don't need their own tests
+- **Write tests where functionality is used** - Test at the integration point, not the utility definition
+- Examples of what NOT to test:
+  - Mock implementations themselves
+  - Test helper functions
+  - Test setup/configuration code
+  - Testing framework behavior
+
 ## Design Principles
 
 ### User Mental Model
